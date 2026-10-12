@@ -13,9 +13,11 @@ from .models import (
     DedupLead,
     EnrichedLead,
     Lead,
+    LeadPost,
     OutreachEntry,
     PipelineJob,
     SheetModel,
+    WebsitePage,
 )
 
 # Logical schema keys (stable in code, independent of the tab display name).
@@ -24,6 +26,8 @@ KEY_DEDUP = "deduplicated_leads"
 KEY_ENRICHED = "instagram_leads_enriched"
 KEY_OUTREACH = "outreach"
 KEY_JOBS = "pipeline_jobs"
+KEY_POSTS = "lead_posts"
+KEY_WEBSITE_PAGES = "website_pages"
 
 
 def scrape_headers(max_slots: int = 5) -> list[str]:
@@ -65,6 +69,8 @@ IG_LEADS_HEADERS: tuple[str, ...] = (
     "createdAt",
     "updatedAt",
     "lastError",
+    "mediaStatus",
+    "websiteStatus",
 )
 
 DEDUP_HEADERS: tuple[str, ...] = (
@@ -139,6 +145,45 @@ PIPELINE_JOBS_HEADERS: tuple[str, ...] = (
     "updatedAt",
 )
 
+LEAD_POSTS_HEADERS: tuple[str, ...] = (
+    "postId",
+    "leadId",
+    "username",
+    "usernameNormalized",
+    "mediaType",
+    "productType",
+    "shortCode",
+    "url",
+    "caption",
+    "likeCount",
+    "commentCount",
+    "playCount",
+    "takenAt",
+    "fetchedAt",
+    "status",
+    "lastError",
+    "createdAt",
+    "updatedAt",
+)
+
+WEBSITE_PAGES_HEADERS: tuple[str, ...] = (
+    "pageId",
+    "leadId",
+    "username",
+    "url",
+    "resolvedUrl",
+    "domain",
+    "title",
+    "text",
+    "links",
+    "httpStatus",
+    "status",
+    "error",
+    "fetchedAt",
+    "createdAt",
+    "updatedAt",
+)
+
 
 @dataclass(frozen=True)
 class SheetSchema:
@@ -195,6 +240,20 @@ SCHEMAS: dict[str, SheetSchema] = {
         headers=PIPELINE_JOBS_HEADERS,
         key_header="jobId",
         model=PipelineJob,
+    ),
+    KEY_POSTS: SheetSchema(
+        key=KEY_POSTS,
+        default_tab="Lead Posts",
+        headers=LEAD_POSTS_HEADERS,
+        key_header="postId",
+        model=LeadPost,
+    ),
+    KEY_WEBSITE_PAGES: SheetSchema(
+        key=KEY_WEBSITE_PAGES,
+        default_tab="Website Pages",
+        headers=WEBSITE_PAGES_HEADERS,
+        key_header="pageId",
+        model=WebsitePage,
     ),
 }
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 # Pipeline stages
 STAGE_PROFILE_FETCH = "profile_fetch"
+STAGE_PROFILE_MEDIA = "profile_media"
+STAGE_WEBSITE_ENRICH = "website_enrich"
 
 # Job statuses (`Pipeline Jobs` tab)
 JOB_QUEUED = "queued"
@@ -22,3 +24,10 @@ LEAD_STATUS_QUEUED = "queued"
 LEAD_STATUS_ENRICHED = "enriched"
 LEAD_STATUS_NOT_FOUND = "not_found"
 LEAD_STATUS_ERROR = "error"
+
+# Optional-stage statuses (lead `mediaStatus` / `websiteStatus`)
+STAGE_STATUS_DONE = "done"
+STAGE_STATUS_PARTIAL = "partial"
+STAGE_STATUS_NONE = "none"          # genuinely no data (no posts / no website)
+STAGE_STATUS_BLOCKED = "blocked"    # URL rejected by SSRF/allow-list rules
+STAGE_STATUS_ERROR = "error"

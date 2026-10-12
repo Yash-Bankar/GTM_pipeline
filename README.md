@@ -43,7 +43,8 @@ synpo-gtm-automation/
 │  ├─ sheets-contract.md   Google Sheets tab schemas and setup
 │  ├─ api.md               Lead API reference (Phase 2)
 │  ├─ hikerapi.md          HikerAPI provider reference (Phase 3)
-│  └─ worker.md            Autonomous worker reference (Phase 4)
+│  ├─ worker.md            Autonomous worker reference (Phase 4)
+│  └─ website-enrichment.md Website crawl + SSRF rules (Phase 5)
 ├─ scripts/           Helper scripts (verify_sheets.py)
 ├─ tests/             Unit tests (mocked Sheets client)
 ├─ pytest.ini         Pytest configuration
@@ -184,6 +185,19 @@ cd backend
 ```
 
 One worker and one API instance only (spreadsheet-backed MVP).
+
+## Profile media + website enrichment (Phase 5)
+
+After `profile_fetch`, the worker enqueues two optional stages:
+
+- `profile_media` — bounded recent posts/reels → `Lead Posts` (keyed by `postId`).
+- `website_enrich` — SSRF-safe crawl of the profile's links → `Website Pages`
+  (keyed by `pageId`), with strict URL validation, size/timeout limits and
+  bounded retries. See [docs/website-enrichment.md](docs/website-enrichment.md).
+
+Both are idempotent and never stall the pipeline when data is unavailable
+(missing website, blocked URLs, partial failures). Follower lists are never
+fetched.
 
 ## Documentation
 

@@ -8,8 +8,10 @@ from the legacy reference project's `HikerAPIClient` (`user/by/username` +
 ## Endpoint and auth (current docs)
 
 - `GET https://api.hikerapi.com/v2/user/by/username?username=<handle>`
+- `GET https://api.hikerapi.com/v2/user/medias?user_id=<pk>` — recent posts/reels
+  (v2 pagination via `page_id`/`next_page_id`), used by the media stage.
 - Header: `x-access-key: <HIKERAPI_KEY>`
-- Response (v2): `{ "user": { ... }, "status": "ok" }`
+- Response (v2 user): `{ "user": { ... }, "status": "ok" }`
 
 Credentials are read from the environment and stay **server-side**; the key is
 never logged or returned by the API.

@@ -142,3 +142,109 @@ def to_lead_fields(profile: HikerProfile, *, scraped_at: str | None = None) -> d
         "allExternalUrls": ",".join(all_urls),
         "scrapedAt": scraped_at or utc_now_iso(),
     }
+
+
+class HikerPost(BaseModel):
+    """A normalized recent media item (post or reel)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    post_id: str
+    short_code: str = ""
+    media_type: str = ""
+    product_type: str = ""
+    caption: str = ""
+    like_count: int = 0
+    comment_count: int = 0
+    play_count: int = 0
+    taken_at: str = ""
+    url: str = ""
+
+
+def _caption_text(media: dict[str, Any]) -> str:
+    caption = media.get("caption")
+    if isinstance(caption, dict):
+        text = caption.get("text")
+        if text:
+            return str(text)
+    for key in ("caption_text", "accessibility_caption"):
+        if media.get(key):
+            return str(media[key])
+    return ""
+
+
+def _first_int(media: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        if media.get(key) is not None:
+            return _as_int(media[key])
+    return 0
+
+
+def parse_post_item(item: dict[str, Any]) -> HikerPost | None:
+    """Normalize a single HikerAPI media item (lenient across v1/v2 shapes)."""
+    media = item.get("media") if isinstance(item.get("media"), dict) else item
+    if not isinstance(media, dict):
+        return None
+
+    post_id = _as_str(media.get("pk") or media.get("id") or media.get("strong_id__"))
+    if not post_id:
+        return None
+
+    short_code = _as_str(media.get("code") or media.get("shortcode"))
+    media_type = _as_str(media.get("media_type"))
+    product_type = _as_str(media.get("product_type"))
+
+    taken_at = _as_str(media.get("taken_at"))
+    if not taken_at and media.get("taken_at_ts") is not None:
+        taken_at = _as_str(media.get("taken_at_ts"))
+
+    url = ""
+    if short_code:
+        url = f"https://www.instagram.com/p/{short_code}/"
+    elif media.get("url"):
+        url = _as_str(media.get("url"))
+
+    return HikerPost(
+        post_id=post_id,
+        short_code=short_code,
+        media_type=media_type,
+        product_type=product_type,
+        caption=_caption_text(media),
+        like_count=_first_int(media, "like_count", "like_count_total"),
+        comment_count=_first_int(media, "comment_count"),
+        play_count=_first_int(media, "play_count", "view_count", "video_view_count"),
+        taken_at=taken_at,
+        url=url,
+    )
+
+
+def parse_media_payload(payload: Any) -> tuple[list[HikerPost], str]:
+    """Parse a media response into ``(posts, next_page_id)``.
+
+    Handles the documented v2 shape ``{"response": {"items": [...]}}`` as well as
+    a bare list or ``{"items": [...]}``. ``next_page_id`` is read when present.
+    """
+    next_page_id = ""
+    items: Any = payload
+
+    if isinstance(payload, dict):
+        next_page_id = _as_str(payload.get("next_page_id") or payload.get("end_cursor"))
+        response = payload.get("response")
+        if isinstance(response, dict):
+            next_page_id = next_page_id or _as_str(response.get("next_page_id"))
+            items = response.get("items") or response.get("media") or []
+        elif isinstance(response, list):
+            items = response
+        else:
+            items = payload.get("items") or []
+
+    if not isinstance(items, list):
+        items = []
+
+    posts: list[HikerPost] = []
+    for item in items:
+        if isinstance(item, dict):
+            post = parse_post_item(item)
+            if post is not None:
+                posts.append(post)
+    return posts, next_page_id

@@ -155,3 +155,46 @@ class PipelineJob(SheetModel):
     run_after: str = Field(default="", alias="runAfter")
     created_at: str = Field(default="", alias="createdAt")
     updated_at: str = Field(default="", alias="updatedAt")
+
+
+class LeadPost(SheetModel):
+    """Row in the `Lead Posts` tab (one recent media item per row)."""
+
+    post_id: str = Field(default="", alias="postId")
+    lead_id: str = Field(default="", alias="leadId")
+    username: str = Field(default="", alias="username")
+    username_normalized: str = Field(default="", alias="usernameNormalized")
+    media_type: str = Field(default="", alias="mediaType")
+    product_type: str = Field(default="", alias="productType")
+    short_code: str = Field(default="", alias="shortCode")
+    url: str = Field(default="", alias="url")
+    caption: str = Field(default="", alias="caption")
+    like_count: IntField = Field(default=0, alias="likeCount")
+    comment_count: IntField = Field(default=0, alias="commentCount")
+    play_count: IntField = Field(default=0, alias="playCount")
+    taken_at: str = Field(default="", alias="takenAt")
+    fetched_at: str = Field(default="", alias="fetchedAt")
+    status: str = Field(default="done", alias="status")
+    last_error: str = Field(default="", alias="lastError")
+    created_at: str = Field(default="", alias="createdAt")
+    updated_at: str = Field(default="", alias="updatedAt")
+
+
+class WebsitePage(SheetModel):
+    """Row in the `Website Pages` tab (one crawled page per row)."""
+
+    page_id: str = Field(default="", alias="pageId")
+    lead_id: str = Field(default="", alias="leadId")
+    username: str = Field(default="", alias="username")
+    url: str = Field(default="", alias="url")
+    resolved_url: str = Field(default="", alias="resolvedUrl")
+    domain: str = Field(default="", alias="domain")
+    title: str = Field(default="", alias="title")
+    text: str = Field(default="", alias="text")
+    links: str = Field(default="", alias="links")
+    http_status: IntField = Field(default=0, alias="httpStatus")
+    status: str = Field(default="", alias="status")
+    error: str = Field(default="", alias="error")
+    fetched_at: str = Field(default="", alias="fetchedAt")
+    created_at: str = Field(default="", alias="createdAt")
+    updated_at: str = Field(default="", alias="updatedAt")

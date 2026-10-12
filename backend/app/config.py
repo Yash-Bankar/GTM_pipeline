@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     google_sheets_enriched_tab: str = "instagram_leads_enriched"
     google_sheets_outreach_tab: str = "Outreach"
     google_sheets_jobs_tab: str = "Pipeline Jobs"
+    google_sheets_posts_tab: str = "Lead Posts"
+    google_sheets_website_pages_tab: str = "Website Pages"
     google_application_credentials: str = ""
 
     # Google Sheets client behaviour
@@ -63,6 +65,18 @@ class Settings(BaseSettings):
     # Worker
     worker_poll_seconds: int = 30
     worker_stale_minutes: int = 30
+
+    # Profile media (recent posts/reels)
+    media_max_posts: int = 12
+    media_max_pages: int = 2
+
+    # Website enrichment (crawl + SSRF-safe fetch)
+    website_max_pages: int = 5
+    website_max_links_per_page: int = 30
+    website_timeout_seconds: float = 10.0
+    website_max_bytes: int = 2_000_000
+    website_max_attempts: int = 2
+    website_user_agent: str = "SynpoGTM/0.1"
 
     # Pipeline job retries
     pipeline_max_attempts: int = 3

@@ -193,37 +193,45 @@ before its predecessor's exit criteria are met.
 - **Status:** implemented in `backend/app/providers/`. See
   [hikerapi.md](hikerapi.md).
 
-### Phase 4 — Enrichment worker (HikerAPI write-back + website evidence)
-- **Deliverables:** worker stage that reads pending `Deduplicated Leads`, calls
-  the HikerAPI provider, and writes results to `instagram_leads_enriched`
-  idempotently; website/link-in-bio crawler and email extraction adding evidence
-  columns; rate limiting; per-row error handling.
-- **Boundary:** no AI.
-- **Exit criteria:** pending handles become enriched rows with profile + website
-  evidence; failures recorded.
-- **Status:** worker + `Pipeline Jobs` queue + `profile_fetch` stage implemented
-  in `backend/app/worker/` (see [worker.md](worker.md)). Website evidence is
-  still pending.
+### Phase 4 — Autonomous worker + profile fetch
+- **Deliverables:** worker that polls `Pipeline Jobs`, claims one job, runs a
+  stage, persists progress (idempotent, retry-aware, restart-safe); the
+  `profile_fetch` stage writing `instagram_leads_enriched`.
+- **Boundary:** no AI; no media/website yet.
+- **Exit criteria:** queued jobs enrich leads and survive restarts.
+- **Status:** implemented in `backend/app/worker/` (see
+  [worker.md](worker.md)).
 
-### Phase 5 — AI generation (Gemini)
+### Phase 5 — Profile media + website enrichment
+- **Deliverables:** `profile_media` stage (bounded recent posts/reels →
+  `Lead Posts`) and `website_enrich` stage (SSRF-safe crawl + email extraction →
+  `Website Pages`), both optional and idempotent.
+- **Boundary:** no AI; no follower-list fetching.
+- **Exit criteria:** leads gain media and website evidence; missing/blocked data
+  never stalls the pipeline.
+- **Status:** implemented in `backend/app/providers/website.py` and
+  `backend/app/worker/pipeline.py` (see
+  [website-enrichment.md](website-enrichment.md)).
+
+### Phase 6 — AI generation (Gemini)
 - **Deliverables:** Gemini client; dossier + personalized outreach prompts;
   results written to `Outreach`; schema finalized.
 - **Boundary:** generation only, no sending.
 - **Exit criteria:** enriched leads produce outreach drafts in the sheet.
 
-### Phase 6 — Frontend dashboard
+### Phase 7 — Frontend dashboard
 - **Deliverables:** queue/status views, manual stage triggers, lead detail, and
   generated-outreach review; consumes the FastAPI API.
 - **Boundary:** UI only; no direct Sheets access.
 - **Exit criteria:** operators can drive the pipeline from the browser.
 
-### Phase 7 — Orchestration & scheduling hardening
+### Phase 8 — Orchestration & scheduling hardening
 - **Deliverables:** worker scheduling, retries/backoff, stale-job recovery,
   observability, run configuration; a Sheets-based work lease to allow more than
   one writer.
 - **Exit criteria:** unattended daily operation is reliable.
 
-### Phase 8 — Hermes Agent integration
+### Phase 9 — Hermes Agent integration
 - **Deliverables:** agent integration over enriched/outreach data.
 - **Exit criteria:** defined once Hermes's interface is known.
 

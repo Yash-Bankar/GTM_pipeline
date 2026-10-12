@@ -13,6 +13,20 @@ backend/app/worker/
 └─ __init__.py exports
 ```
 
+## Stages
+
+| Stage | What it does | Writes | Idempotency key |
+| --- | --- | --- | --- |
+| `profile_fetch` | HikerAPI profile → enriched row; enqueues the optional follow-ups | `instagram_leads_enriched`, `IG Leads` | `leadId` |
+| `profile_media` | bounded recent posts/reels | `Lead Posts`, lead `mediaStatus` | `postId` |
+| `website_enrich` | SSRF-safe crawl of external links | `Website Pages`, lead `websiteStatus` | `pageId` |
+
+`profile_fetch` enqueues `profile_media` (when an Instagram id is known) and
+`website_enrich` (when the profile has links). The media/website stages are
+**optional**: when data is genuinely unavailable they mark a status
+(`none`/`blocked`/`error`/`partial`) and still complete the job so the pipeline
+keeps moving. See [website-enrichment.md](website-enrichment.md).
+
 ## `Pipeline Jobs` tab
 
 Header row (contract):
@@ -98,14 +112,16 @@ See `.env.example`: `WORKER_POLL_SECONDS`, `WORKER_STALE_MINUTES`,
 ## Tests
 
 ```powershell
-.\backend\.venv\Scripts\python.exe -m pytest tests\test_jobs_store.py tests\test_worker_pipeline.py tests\test_worker_loop.py
+.\backend\.venv\Scripts\python.exe -m pytest tests\test_jobs_store.py tests\test_worker_pipeline.py tests\test_worker_loop.py tests\test_worker_stages_media_website.py
 ```
 
 Coverage: enqueue/dedupe, claim, run-after gating, complete/fail with bounded
 retries, stale-job recovery, successful profile fetch, not-found (terminal),
 quota (retryable), idempotent re-run, unknown stage, drain/max-jobs, graceful
-shutdown, and restart recovery.
+shutdown, restart recovery, media storage/dedupe/skip, website partial/blocked/
+missing, and downstream enqueue.
 
-## Out of scope (Phase 4)
+## Out of scope (Phase 5)
 
-No recent-media research, no website crawling, no Gemini, no outreach sending.
+No Gemini generation and no sending of any external messages. Followers/following
+lists are never fetched.

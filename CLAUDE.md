@@ -121,6 +121,21 @@ versions.
 - Support graceful shutdown (stop event) and restart recovery
   (`recover_stale_jobs`).
 
+## Enrichment stage rules (Phase 5)
+
+- Media + website stages live in `backend/app/worker/pipeline.py`; website crawl
+  in `backend/app/providers/website.py`; SSRF rules in
+  [docs/website-enrichment.md](docs/website-enrichment.md).
+- Idempotency keys: `postId` for `Lead Posts`, deterministic `pageId`
+  (hash of `leadId`+`url`) for `Website Pages`; upsert, never append duplicates.
+- Optional stages must **never block the pipeline**: when data is unavailable,
+  set `mediaStatus`/`websiteStatus` (`done`/`partial`/`none`/`blocked`/`error`)
+  and return an ok outcome.
+- Website fetching must enforce the SSRF controls (scheme allow-list, host
+  block-list, public-IP resolution, manual redirect validation, size limit,
+  timeout, bounded retries). Never fetch follower lists or crawl unbounded links.
+- Bound HikerAPI media calls (`MEDIA_MAX_POSTS`/`MEDIA_MAX_PAGES`).
+
 ## Commands
 
 ```powershell

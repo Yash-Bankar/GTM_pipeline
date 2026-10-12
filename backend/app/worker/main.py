@@ -18,10 +18,17 @@ import signal
 import threading
 
 from app.config import Settings, get_settings
-from app.constants import STAGE_PROFILE_FETCH
+from app.constants import STAGE_PROFILE_FETCH, STAGE_PROFILE_MEDIA, STAGE_WEBSITE_ENRICH
 from app.dependencies import SheetStores, build_sheet_stores
 from app.providers import HikerAPIClient
-from app.worker.pipeline import ProfileFetchStage, Stage, StageOutcome
+from app.providers.website import WebsiteCrawler
+from app.worker.pipeline import (
+    ProfileFetchStage,
+    ProfileMediaStage,
+    Stage,
+    StageOutcome,
+    WebsiteEnrichStage,
+)
 
 logger = logging.getLogger("synpo.worker")
 
@@ -118,10 +125,35 @@ class Worker:
 
 def build_stages(stores: SheetStores, settings: Settings) -> dict[str, Stage]:
     hiker = HikerAPIClient.from_settings(settings)
+    crawler = WebsiteCrawler(
+        timeout=settings.website_timeout_seconds,
+        max_pages=settings.website_max_pages,
+        max_links_per_page=settings.website_max_links_per_page,
+        max_bytes=settings.website_max_bytes,
+        max_attempts=settings.website_max_attempts,
+        user_agent=settings.website_user_agent,
+    )
     return {
         STAGE_PROFILE_FETCH: ProfileFetchStage(
-            hiker, stores.lead_store, stores.enriched_store
-        )
+            hiker,
+            stores.lead_store,
+            stores.enriched_store,
+            job_store=stores.job_store,
+            followup_max_attempts=settings.pipeline_max_attempts,
+        ),
+        STAGE_PROFILE_MEDIA: ProfileMediaStage(
+            hiker,
+            stores.lead_store,
+            stores.post_store,
+            max_posts=settings.media_max_posts,
+            max_pages=settings.media_max_pages,
+        ),
+        STAGE_WEBSITE_ENRICH: WebsiteEnrichStage(
+            crawler,
+            stores.lead_store,
+            stores.website_store,
+            enriched_store=stores.enriched_store,
+        ),
     }
 
 

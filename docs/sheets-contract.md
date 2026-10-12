@@ -27,6 +27,8 @@ Schema keys are stable in code; tab display names are configurable via env vars.
 | `instagram_leads_enriched` | `GOOGLE_SHEETS_ENRICHED_TAB` | `instagram_leads_enriched` |
 | `outreach` | `GOOGLE_SHEETS_OUTREACH_TAB` | `Outreach` |
 | `pipeline_jobs` | `GOOGLE_SHEETS_JOBS_TAB` | `Pipeline Jobs` |
+| `lead_posts` | `GOOGLE_SHEETS_POSTS_TAB` | `Lead Posts` |
+| `website_pages` | `GOOGLE_SHEETS_WEBSITE_PAGES_TAB` | `Website Pages` |
 
 ### `IG Leads` (canonical)
 
@@ -34,8 +36,11 @@ Schema keys are stable in code; tab display names are configurable via env vars.
 leadId, username, usernameNormalized, fullName, instagramId, followerCount,
 followsCount, businessCategoryName, bio, businessEmail, businessPhoneNumber,
 profileUrl, externalUrl, allExternalUrls, engagementRate, scrapedAt, status,
-source, createdAt, updatedAt, lastError
+source, createdAt, updatedAt, lastError, mediaStatus, websiteStatus
 ```
+
+`mediaStatus` / `websiteStatus` track the optional Phase-5 stages
+(`done` / `partial` / `none` / `blocked` / `error`).
 
 ### `Deduplicated Leads`
 
@@ -76,6 +81,28 @@ createdAt, updatedAt
 
 The worker's queue. `(stage, leadId)` is the idempotency key; statuses are
 `queued`/`running`/`retry`/`done`/`error`. See [worker.md](worker.md).
+
+### `Lead Posts`
+
+```text
+postId, leadId, username, usernameNormalized, mediaType, productType, shortCode,
+url, caption, likeCount, commentCount, playCount, takenAt, fetchedAt, status,
+lastError, createdAt, updatedAt
+```
+
+Recent posts/reels per lead (Phase 5). `postId` (Instagram media id) is the
+idempotency key.
+
+### `Website Pages`
+
+```text
+pageId, leadId, username, url, resolvedUrl, domain, title, text, links,
+httpStatus, status, error, fetchedAt, createdAt, updatedAt
+```
+
+Crawled website pages (Phase 5). `pageId` is a deterministic hash of
+`(leadId, url)`, so re-runs upsert rather than duplicate. `status` is
+`done`/`error`/`blocked`. See [website-enrichment.md](website-enrichment.md).
 
 > `Sheet4` is still undefined/unverified and is intentionally not implemented.
 

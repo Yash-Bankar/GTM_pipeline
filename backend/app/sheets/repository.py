@@ -37,6 +37,8 @@ from .schemas import (
     KEY_IG_LEADS,
     KEY_JOBS,
     KEY_OUTREACH,
+    KEY_POSTS,
+    KEY_WEBSITE_PAGES,
     SCHEMAS,
     SheetSchema,
     normalize_username,
@@ -101,6 +103,8 @@ def tab_names_from_settings(settings: Settings) -> dict[str, str]:
         KEY_ENRICHED: settings.google_sheets_enriched_tab,
         KEY_OUTREACH: settings.google_sheets_outreach_tab,
         KEY_JOBS: settings.google_sheets_jobs_tab,
+        KEY_POSTS: settings.google_sheets_posts_tab,
+        KEY_WEBSITE_PAGES: settings.google_sheets_website_pages_tab,
     }
 
 

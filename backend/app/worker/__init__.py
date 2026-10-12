@@ -11,6 +11,20 @@ configured stage, persists progress, and repeats. One worker instance only.
 from __future__ import annotations
 
 from .main import Worker, main
-from .pipeline import ProfileFetchStage, Stage, StageOutcome
+from .pipeline import (
+    ProfileFetchStage,
+    ProfileMediaStage,
+    Stage,
+    StageOutcome,
+    WebsiteEnrichStage,
+)
 
-__all__ = ["ProfileFetchStage", "Stage", "StageOutcome", "Worker", "main"]
+__all__ = [
+    "ProfileFetchStage",
+    "ProfileMediaStage",
+    "Stage",
+    "StageOutcome",
+    "WebsiteEnrichStage",
+    "Worker",
+    "main",
+]

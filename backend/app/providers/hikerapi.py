@@ -33,12 +33,18 @@ from .errors import (
     HikerAPIRateLimitError,
     HikerAPIResponseError,
 )
-from .models import HikerProfile, parse_profile_payload
+from .models import (
+    HikerPost,
+    HikerProfile,
+    parse_media_payload,
+    parse_profile_payload,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.hikerapi.com/v2"
 USER_BY_USERNAME_PATH = "/user/by/username"
+USER_MEDIAS_PATH = "/user/medias"
 _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
@@ -132,13 +138,9 @@ class HikerAPIClient:
     def _headers(self) -> dict[str, str]:
         return {"accept": "application/json", "x-access-key": self._api_key}
 
-    def _request_profile(self, username: str) -> dict[str, Any]:
+    def _get(self, path: str, params: dict[str, Any], *, context: str) -> Any:
         def _do_request() -> httpx.Response:
-            response = self._http.get(
-                USER_BY_USERNAME_PATH,
-                params={"username": username},
-                headers=self._headers(),
-            )
+            response = self._http.get(path, params=params, headers=self._headers())
             if response.status_code in _RETRYABLE_STATUSES:
                 raise _RetryableStatus(response.status_code)
             return response
@@ -148,8 +150,8 @@ class HikerAPIClient:
 
         def _on_retry(attempt: int, delay: float, exc: BaseException) -> None:
             logger.warning(
-                "HikerAPI request for @%s failed (attempt %s/%s), retrying in %.2fs: %s",
-                username,
+                "HikerAPI request (%s) failed (attempt %s/%s), retrying in %.2fs: %s",
+                context,
                 attempt,
                 self._max_attempts,
                 delay,
@@ -180,29 +182,54 @@ class HikerAPIClient:
                 f"HikerAPI request failed: {type(exc).__name__}: {exc}"
             ) from exc
 
-        return self._parse_response(response, username)
+        return self._parse_response(response)
+
+    def _request_profile(self, username: str) -> dict[str, Any]:
+        payload = self._get(
+            USER_BY_USERNAME_PATH, {"username": username}, context=f"@{username}"
+        )
+        if not isinstance(payload, dict) or not (
+            isinstance(payload.get("user"), dict) or payload.get("username")
+        ):
+            raise HikerAPIResponseError(
+                "HikerAPI response did not contain a user object."
+            )
+        return payload
+
+    def fetch_recent_posts(
+        self, user_id: str, *, limit: int = 12, max_pages: int = 2
+    ) -> list[HikerPost]:
+        """Fetch up to ``limit`` recent media items for a user id (bounded pages)."""
+        if not user_id or not str(user_id).strip():
+            raise InvalidLeadInput("A user id is required to fetch media.")
+
+        posts: list[HikerPost] = []
+        page_id = ""
+        for _page in range(max(1, int(max_pages))):
+            params: dict[str, Any] = {"user_id": str(user_id)}
+            if page_id:
+                params["page_id"] = page_id
+            payload = self._get(USER_MEDIAS_PATH, params, context=f"user_id={user_id}")
+            page_posts, page_id = parse_media_payload(payload)
+            posts.extend(page_posts)
+            if len(posts) >= limit or not page_id:
+                break
+        return posts[:limit]
 
     @staticmethod
-    def _parse_response(response: httpx.Response, username: str) -> dict[str, Any]:
+    def _parse_response(response: httpx.Response) -> Any:
         status = response.status_code
         if status == 200:
             try:
-                payload = response.json()
+                return response.json()
             except ValueError as exc:
                 raise HikerAPIResponseError(
                     "HikerAPI returned a non-JSON response."
                 ) from exc
-            if not isinstance(payload, dict) or not (
-                isinstance(payload.get("user"), dict) or payload.get("username")
-            ):
-                raise HikerAPIResponseError(
-                    "HikerAPI response did not contain a user object."
-                )
-            return payload
         if status in (401, 403):
             raise HikerAPIAuthError("HikerAPI rejected the API key (HTTP %s)." % status)
         if status == 404:
-            raise HikerAPINotFoundError(f"Instagram profile '@{username}' was not found.")
+            raise HikerAPINotFoundError("HikerAPI resource was not found (HTTP 404).")
         if status == 402:
             raise HikerAPIQuotaError("HikerAPI balance/quota exhausted (HTTP 402).")
         raise HikerAPIResponseError(f"HikerAPI returned unexpected HTTP {status}.")

@@ -26,7 +26,7 @@ from .errors import (
     SheetsPermissionError,
     SheetsQuotaError,
 )
-from .models import DedupLead, EnrichedLead, Lead, OutreachEntry, PipelineJob, SheetModel
+from .models import DedupLead, EnrichedLead, Lead, LeadPost, OutreachEntry, PipelineJob, SheetModel, WebsitePage
 from .repository import (
     JobStore,
     LeadStore,
@@ -45,9 +45,13 @@ from .schemas import (
     KEY_IG_LEADS,
     KEY_JOBS,
     KEY_OUTREACH,
+    KEY_POSTS,
+    KEY_WEBSITE_PAGES,
+    LEAD_POSTS_HEADERS,
     OUTREACH_HEADERS,
     PIPELINE_JOBS_HEADERS,
     SCHEMAS,
+    WEBSITE_PAGES_HEADERS,
     SheetSchema,
     normalize_username,
     scrape_headers,
@@ -68,7 +72,11 @@ __all__ = [
     "KEY_IG_LEADS",
     "KEY_JOBS",
     "KEY_OUTREACH",
+    "KEY_POSTS",
+    "KEY_WEBSITE_PAGES",
+    "LEAD_POSTS_HEADERS",
     "Lead",
+    "LeadPost",
     "LeadStore",
     "OUTREACH_HEADERS",
     "OutreachEntry",
@@ -92,6 +100,8 @@ __all__ = [
     "SheetsPermissionError",
     "SheetsQuotaError",
     "TabLayout",
+    "WEBSITE_PAGES_HEADERS",
+    "WebsitePage",
     "build_sheets_service",
     "column_letter",
     "new_job_id",

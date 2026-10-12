@@ -55,6 +55,74 @@ class FakeHikerClient:
         return self._handler(username)
 
 
+def make_post(post_id: str = "1001", **overrides: object):
+    """Build a normalized HikerPost for tests."""
+    from app.providers.models import HikerPost
+
+    data: dict[str, object] = {
+        "post_id": post_id,
+        "short_code": f"SC{post_id}",
+        "media_type": "2",
+        "product_type": "clips",
+        "caption": "hello world",
+        "like_count": 10,
+        "comment_count": 2,
+        "play_count": 100,
+        "taken_at": "1700000000",
+        "url": f"https://www.instagram.com/p/SC{post_id}/",
+    }
+    data.update(overrides)
+    return HikerPost(**data)
+
+
+def make_fetched_page(url: str, *, status: str = "done", **overrides: object):
+    """Build a FetchedPage for tests."""
+    from app.providers.website import FetchedPage
+
+    data: dict[str, object] = {
+        "url": url,
+        "resolved_url": url,
+        "domain": "example.org",
+        "title": "Example",
+        "text": "contact us hello@example.org",
+        "links": [],
+        "emails": ["hello@example.org"],
+        "http_status": 200 if status == "done" else 0,
+        "status": status,
+        "error": "" if status == "done" else f"{status} reason",
+    }
+    data.update(overrides)
+    return FetchedPage(**data)
+
+
+class FakeMediaClient:
+    """Stand-in for a media fetcher."""
+
+    def __init__(self, posts=None, error: BaseException | None = None) -> None:
+        self._posts = list(posts or [])
+        self._error = error
+        self.calls = 0
+
+    def fetch_recent_posts(self, user_id: str, *, limit: int, max_pages: int):
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return self._posts[:limit]
+
+
+class FakeCrawler:
+    """Stand-in for WebsiteCrawler."""
+
+    def __init__(self, pages=None, emails=None) -> None:
+        self._pages = list(pages or [])
+        self._emails = list(emails or [])
+        self.calls = 0
+
+    def crawl(self, start_urls):
+        self.calls += 1
+        return list(self._pages), list(self._emails)
+
+
 class RecordingStage:
     """A trivial stage that records jobs and returns a configured outcome."""
 
