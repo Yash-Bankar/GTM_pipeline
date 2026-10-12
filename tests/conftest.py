@@ -23,3 +23,24 @@ def ig_client() -> FakeSheetsClient:
 @pytest.fixture
 def lead_store(ig_client: FakeSheetsClient) -> LeadStore:
     return LeadStore(ig_client)
+
+
+@pytest.fixture
+def api_store(ig_client: FakeSheetsClient) -> LeadStore:
+    return LeadStore(ig_client, tab_names={"ig_leads": "IG Leads"})
+
+
+@pytest.fixture
+def api_client(api_store: LeadStore):
+    """A FastAPI TestClient whose lead service is backed by the fake store."""
+    from fastapi.testclient import TestClient
+
+    from app.dependencies import get_lead_service
+    from app.leads.service import LeadService
+    from app.main import app
+
+    service = LeadService(api_store)
+    app.dependency_overrides[get_lead_service] = lambda: service
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()

@@ -71,3 +71,38 @@ class FakeSheetsClient(SheetsClient):
             raise SheetsApiError(f"tab already exists: {title}")
         self.tabs[title] = []
         self.created_tabs.append(title)
+
+
+class RaisingSheetsClient(SheetsClient):
+    """A client whose every call raises a configured exception.
+
+    Used to verify that storage failures surface as clear HTTP responses.
+    """
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def _raise(self) -> None:
+        raise self._exc
+
+    def list_tab_titles(self) -> list[str]:
+        self._raise()
+
+    def read_tab(self, tab: str) -> list[list[str]]:
+        self._raise()
+
+    def read_tabs(self, tabs: list[str]) -> dict[str, list[list[str]]]:
+        self._raise()
+
+    def read_row(self, tab: str, row_number: int) -> list[str]:
+        self._raise()
+
+    def append_rows(self, tab: str, rows: list[list[str]]) -> None:
+        self._raise()
+
+    def update_cells(self, tab: str, updates: list[tuple[int, int, str]]) -> None:
+        self._raise()
+
+    def create_tab(self, title: str) -> None:
+        self._raise()
+

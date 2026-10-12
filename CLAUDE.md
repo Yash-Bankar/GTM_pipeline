@@ -75,6 +75,22 @@ versions.
   Do not add a concurrent job claimer until a Sheets-based lease exists.
 - Do not call HikerAPI, Gemini, or scrape websites from the storage layer.
 
+## Lead API rules (Phase 2)
+
+- The API is `backend/app/leads/` + `backend/app/main.py`; reference in
+  [docs/api.md](docs/api.md).
+- The browser/frontend must never call Google Sheets directly — only this API.
+- Validate and normalize usernames via `app/leads/validation.py`; reject
+  non-Instagram URLs and invalid handles with `422`.
+- Deduplicate by normalized username and return a clear `created` true/false. Use
+  `LeadStore.create_or_get_lead(...)`, which checks and appends under the write
+  lock — do not hand-roll find-then-create.
+- Assign the stable `leadId` in the store, never in the route handler.
+- New leads are enqueued by setting `status="queued"`; do not start scraping/AI.
+- Keep request/response models typed (`app/leads/schemas.py`).
+- Map storage failures to HTTP via the handlers in `main.py` (503 config/quota,
+  502 other Sheets errors).
+
 ## Commands
 
 ```powershell

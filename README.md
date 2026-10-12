@@ -31,13 +31,15 @@ synpo-gtm-automation/
 ├─ backend/           FastAPI app + background worker (Python)
 │  ├─ app/
 │  │  ├─ config.py    Settings loaded from environment
-│  │  ├─ main.py      FastAPI entrypoint (health check only for now)
+│  │  ├─ main.py      FastAPI app (health + lead API)
 │  │  ├─ worker.py    Worker entrypoint (stub for now)
+│  │  ├─ leads/       Lead API: validation, service, routes (Phase 2)
 │  │  └─ sheets/      Google Sheets storage layer (Phase 1)
 │  └─ requirements.txt
 ├─ docs/
 │  ├─ architecture.md      Proposed architecture, data flow, phase boundaries
-│  └─ sheets-contract.md   Google Sheets tab schemas and setup
+│  ├─ sheets-contract.md   Google Sheets tab schemas and setup
+│  └─ api.md               Lead API reference (Phase 2)
 ├─ scripts/           Helper scripts (verify_sheets.py)
 ├─ tests/             Unit tests (mocked Sheets client)
 ├─ pytest.ini         Pytest configuration
@@ -129,6 +131,26 @@ Verify your development spreadsheet (requires `secrets/service-account.json` and
 .\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --create-missing-tabs --extend-headers
 .\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --write-test-row
 ```
+
+## Lead API (Phase 2)
+
+Submit and retrieve leads over HTTP; the browser never accesses Google Sheets
+directly. See [docs/api.md](docs/api.md) for the full reference.
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+cd ..
+
+# submit a lead (201 new, 200 if it already exists)
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/leads -ContentType application/json -Body '{"username":"@some.creator"}'
+
+# list with pagination/search
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/leads?limit=20&q=crypto&status=queued"
+```
+
+Endpoints: `POST /api/v1/leads`, `GET /api/v1/leads`, `GET /api/v1/leads/{leadId}`,
+plus `GET /health`. New leads are stored with `status="queued"` for the worker.
 
 ## Documentation
 

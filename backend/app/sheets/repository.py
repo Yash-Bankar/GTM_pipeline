@@ -394,19 +394,72 @@ class LeadStore(SheetStore):
                 )
 
             now = utc_now_iso()
-            lead = Lead(
-                leadId=new_lead_id(),
-                username=username.strip().lstrip("@"),
-                usernameNormalized=normalized,
-                profileUrl=profile_url or f"https://www.instagram.com/{normalized}/",
-                status=status,
+            lead = self._build_lead(
+                username,
+                normalized,
                 source=source,
-                createdAt=now,
-                updatedAt=now,
+                status=status,
+                profile_url=profile_url,
+                now=now,
             )
             self.append_model(self.SCHEMA_KEY, lead)
             logger.info("Created lead %s (@%s)", lead.lead_id, normalized)
             return lead
+
+    def create_or_get_lead(
+        self,
+        username: str,
+        *,
+        source: str = "",
+        status: str = "new",
+        profile_url: str | None = None,
+    ) -> tuple[bool, Lead]:
+        """Atomically create a lead or return the existing one.
+
+        Returns ``(created, lead)``. The duplicate check and append happen under
+        the store's write lock, so concurrent submissions cannot both create the
+        same username.
+        """
+        normalized = normalize_username(username)
+        if not normalized:
+            raise ValueError("username is required")
+
+        with self._lock:
+            existing = self.find_by_username(normalized)
+            if existing is not None:
+                return (False, existing)
+            lead = self._build_lead(
+                username,
+                normalized,
+                source=source,
+                status=status,
+                profile_url=profile_url,
+                now=utc_now_iso(),
+            )
+            self.append_model(self.SCHEMA_KEY, lead)
+            logger.info("Created lead %s (@%s)", lead.lead_id, normalized)
+            return (True, lead)
+
+    def _build_lead(
+        self,
+        username: str,
+        normalized: str,
+        *,
+        source: str,
+        status: str,
+        profile_url: str | None,
+        now: str,
+    ) -> Lead:
+        return Lead(
+            leadId=new_lead_id(),
+            username=username.strip().lstrip("@"),
+            usernameNormalized=normalized,
+            profileUrl=profile_url or f"https://www.instagram.com/{normalized}/",
+            status=status,
+            source=source,
+            createdAt=now,
+            updatedAt=now,
+        )
 
     def get_or_create_lead(self, username: str, **kwargs: object) -> Lead:
         return self.create_lead(username, on_duplicate="return", **kwargs)
