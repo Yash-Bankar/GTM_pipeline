@@ -1,0 +1,46 @@
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Google service account keys and OAuth artifacts (never commit)
+secrets/
+*service-account*.json
+credentials.json
+token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Logs and local runtime output
+*.log
+logs/
+data/
+tmp/
+exports/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
