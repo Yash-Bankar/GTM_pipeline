@@ -9,13 +9,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Type
 
-from .models import DedupLead, EnrichedLead, Lead, OutreachEntry, SheetModel
+from .models import (
+    DedupLead,
+    EnrichedLead,
+    Lead,
+    OutreachEntry,
+    PipelineJob,
+    SheetModel,
+)
 
 # Logical schema keys (stable in code, independent of the tab display name).
 KEY_IG_LEADS = "ig_leads"
 KEY_DEDUP = "deduplicated_leads"
 KEY_ENRICHED = "instagram_leads_enriched"
 KEY_OUTREACH = "outreach"
+KEY_JOBS = "pipeline_jobs"
 
 
 def scrape_headers(max_slots: int = 5) -> list[str]:
@@ -111,6 +119,26 @@ OUTREACH_HEADERS: tuple[str, ...] = (
     "lastError",
 )
 
+PIPELINE_JOBS_HEADERS: tuple[str, ...] = (
+    "jobId",
+    "stage",
+    "leadId",
+    "username",
+    "usernameNormalized",
+    "status",
+    "attemptCount",
+    "maxAttempts",
+    "priority",
+    "payload",
+    "result",
+    "lastError",
+    "lockedAt",
+    "lockedBy",
+    "runAfter",
+    "createdAt",
+    "updatedAt",
+)
+
 
 @dataclass(frozen=True)
 class SheetSchema:
@@ -160,6 +188,13 @@ SCHEMAS: dict[str, SheetSchema] = {
         headers=OUTREACH_HEADERS,
         key_header="leadId",
         model=OutreachEntry,
+    ),
+    KEY_JOBS: SheetSchema(
+        key=KEY_JOBS,
+        default_tab="Pipeline Jobs",
+        headers=PIPELINE_JOBS_HEADERS,
+        key_header="jobId",
+        model=PipelineJob,
     ),
 }
 

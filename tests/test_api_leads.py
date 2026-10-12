@@ -14,6 +14,7 @@ from app.sheets.errors import (
     SheetsQuotaError,
 )
 from app.sheets.repository import LeadStore
+from app.sheets.schemas import KEY_JOBS
 from fakes import RaisingSheetsClient
 
 
@@ -87,6 +88,24 @@ def test_get_lead_by_id(api_client) -> None:
 def test_get_missing_lead_returns_404(api_client) -> None:
     response = api_client.get("/api/v1/leads/ld_does_not_exist")
     assert response.status_code == 404
+
+
+def test_submit_enqueues_profile_fetch_job(api_client, job_store) -> None:
+    response = api_client.post("/api/v1/leads", json={"username": "job.creator"})
+    assert response.status_code == 201
+    lead_id = response.json()["lead"]["lead_id"]
+
+    jobs = job_store.read_rows(KEY_JOBS)
+    assert len(jobs) == 1
+    assert jobs[0].values["stage"] == "profile_fetch"
+    assert jobs[0].values["leadId"] == lead_id
+    assert jobs[0].values["status"] == "queued"
+
+
+def test_duplicate_submission_does_not_duplicate_job(api_client, job_store) -> None:
+    api_client.post("/api/v1/leads", json={"username": "dup.job"})
+    api_client.post("/api/v1/leads", json={"username": "@Dup.Job"})
+    assert len(job_store.read_rows(KEY_JOBS)) == 1
 
 
 def test_list_pagination(api_client) -> None:

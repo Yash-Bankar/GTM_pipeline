@@ -18,6 +18,60 @@ def make_http_error(status: int, message: str = "error") -> HttpError:
     return HttpError(Response({"status": status}), message.encode("utf-8"))
 
 
+def make_profile(username: str = "creator", **overrides: object):
+    """Build a normalized HikerProfile for tests."""
+    from app.providers.models import HikerProfile
+
+    data: dict[str, object] = {
+        "username": username,
+        "instagram_id": "123",
+        "full_name": "A Creator",
+        "biography": "finance educator hi@creator.example.org",
+        "follower_count": 5000,
+        "following_count": 120,
+        "media_count": 42,
+        "external_url": "https://example.org",
+        "bio_links": ["https://example.org"],
+        "emails": ["hi@creator.example.org"],
+        "phone": "",
+        "category": "Education",
+        "is_private": False,
+        "is_verified": False,
+        "is_business": True,
+    }
+    data.update(overrides)
+    return HikerProfile(**data)
+
+
+class FakeHikerClient:
+    """Stand-in for HikerAPIClient: ``handler(username)`` returns a profile or raises."""
+
+    def __init__(self, handler) -> None:
+        self._handler = handler
+        self.calls = 0
+
+    def fetch_profile(self, username: str):
+        self.calls += 1
+        return self._handler(username)
+
+
+class RecordingStage:
+    """A trivial stage that records jobs and returns a configured outcome."""
+
+    def __init__(self, name: str, outcome_factory=None) -> None:
+        self.name = name
+        self.ran: list[str] = []
+        self._outcome_factory = outcome_factory or (lambda job: None)
+
+    def run(self, job):
+        from app.worker.pipeline import StageOutcome
+
+        self.ran.append(job.job_id)
+        outcome = self._outcome_factory(job)
+        return outcome if outcome is not None else StageOutcome(ok=True, result="ok")
+
+
+
 
 class FakeSheetsClient(SheetsClient):
     def __init__(self, tabs: dict[str, list[list[str]]] | None = None) -> None:

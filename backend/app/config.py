@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     google_sheets_dedup_tab: str = "Deduplicated Leads"
     google_sheets_enriched_tab: str = "instagram_leads_enriched"
     google_sheets_outreach_tab: str = "Outreach"
+    google_sheets_jobs_tab: str = "Pipeline Jobs"
     google_application_credentials: str = ""
 
     # Google Sheets client behaviour
@@ -58,6 +59,15 @@ class Settings(BaseSettings):
     google_sheets_max_attempts: int = 5
     google_sheets_backoff_base_seconds: float = 0.5
     google_sheets_backoff_max_seconds: float = 30.0
+
+    # Worker
+    worker_poll_seconds: int = 30
+    worker_stale_minutes: int = 30
+
+    # Pipeline job retries
+    pipeline_max_attempts: int = 3
+    pipeline_retry_backoff_base_seconds: float = 60.0
+    pipeline_retry_backoff_max_seconds: float = 3600.0
 
     def credentials_path(self) -> Path | None:
         """Resolve the service account JSON path.

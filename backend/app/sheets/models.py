@@ -129,3 +129,29 @@ class OutreachEntry(SheetModel):
     created_at: str = Field(default="", alias="createdAt")
     updated_at: str = Field(default="", alias="updatedAt")
     last_error: str = Field(default="", alias="lastError")
+
+
+class PipelineJob(SheetModel):
+    """Row in the `Pipeline Jobs` tab.
+
+    A unit of work for the background worker. `jobId` is the stable key;
+    `(stage, leadId)` is the logical idempotency key.
+    """
+
+    job_id: str = Field(default="", alias="jobId")
+    stage: str = Field(default="", alias="stage")
+    lead_id: str = Field(default="", alias="leadId")
+    username: str = Field(default="", alias="username")
+    username_normalized: str = Field(default="", alias="usernameNormalized")
+    status: str = Field(default="queued", alias="status")
+    attempt_count: IntField = Field(default=0, alias="attemptCount")
+    max_attempts: IntField = Field(default=3, alias="maxAttempts")
+    priority: IntField = Field(default=0, alias="priority")
+    payload: str = Field(default="", alias="payload")
+    result: str = Field(default="", alias="result")
+    last_error: str = Field(default="", alias="lastError")
+    locked_at: str = Field(default="", alias="lockedAt")
+    locked_by: str = Field(default="", alias="lockedBy")
+    run_after: str = Field(default="", alias="runAfter")
+    created_at: str = Field(default="", alias="createdAt")
+    updated_at: str = Field(default="", alias="updatedAt")

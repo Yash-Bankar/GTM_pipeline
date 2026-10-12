@@ -46,7 +46,7 @@ def test_scrape_headers_shape() -> None:
 def test_schema_headers_are_unique_and_include_key(schema) -> None:
     assert len(schema.headers) == len(set(schema.headers))
     assert schema.key_header in schema.headers
-    assert schema.headers[0] == "leadId"
+    assert schema.headers[0] == schema.key_header
 
 
 @pytest.mark.parametrize(

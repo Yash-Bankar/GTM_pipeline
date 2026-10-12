@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.sheets.repository import LeadStore
+from app.constants import STAGE_PROFILE_FETCH
+from app.sheets.repository import JobStore, LeadStore
 from app.sheets.schemas import KEY_IG_LEADS
 from app.sheets.models import Lead
 
@@ -34,11 +35,17 @@ class LeadSubmission:
 
 
 class LeadService:
-    def __init__(self, store: LeadStore) -> None:
+    def __init__(self, store: LeadStore, *, job_store: JobStore | None = None) -> None:
         self._store = store
+        self._job_store = job_store
 
     def submit(self, request: LeadCreateRequest) -> LeadSubmission:
-        """Create a lead or return the existing one (deduplicated)."""
+        """Create a lead or return the existing one (deduplicated).
+
+        New leads are enqueued for the `profile_fetch` stage. Enqueueing is
+        idempotent per ``(stage, lead)`` so duplicate submissions do not create
+        duplicate jobs.
+        """
         parsed = parse_lead_input(request.username)
         created, lead = self._store.create_or_get_lead(
             parsed.username,
@@ -46,6 +53,14 @@ class LeadService:
             status=LEAD_STATUS_QUEUED,
             profile_url=parsed.profile_url,
         )
+        if self._job_store is not None:
+            self._job_store.enqueue(
+                STAGE_PROFILE_FETCH,
+                lead.lead_id,
+                lead.username,
+                lead.username_normalized,
+                max_attempts=3,
+            )
         logger.info(
             "Lead submission @%s -> %s (leadId=%s)",
             parsed.normalized,

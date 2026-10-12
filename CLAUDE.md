@@ -106,6 +106,21 @@ versions.
 - Phase 3 scope: profile fetch + normalization only. Do not add recent-media
   research, website crawling, or Gemini here.
 
+## Worker rules (Phase 4)
+
+- Worker lives in `backend/app/worker/` (`main.py` loop/CLI, `pipeline.py`
+  stages); reference in [docs/worker.md](docs/worker.md).
+- The queue is the `Pipeline Jobs` tab, accessed via `JobStore`. Claim/complete/
+  fail transitions happen under the shared write lock; keep them batched.
+- **One worker instance only** — no concurrent claimer, no cross-process lease.
+- Stages must be **idempotent** (upsert by `leadId`, preserve `createdAt`) and
+  must never send external messages.
+- Classify failures: retryable (rate limit/quota/network/bad payload) vs terminal
+  (not found/auth/config/invalid input); bound retries with backoff.
+- Reuse `app.common.retry.call_with_retry`; store error details in `lastError`.
+- Support graceful shutdown (stop event) and restart recovery
+  (`recover_stale_jobs`).
+
 ## Commands
 
 ```powershell
@@ -116,7 +131,7 @@ versions.
 Invoke-RestMethod http://127.0.0.1:8000/health
 
 # Worker (run from backend/ so the app package resolves)
-cd backend; .\.venv\Scripts\python.exe -m app.worker --once; cd ..
+cd backend; .\.venv\Scripts\python.exe -m app.worker --drain; cd ..
 
 # Python tests
 .\backend\.venv\Scripts\python.exe -m pytest

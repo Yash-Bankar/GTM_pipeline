@@ -15,6 +15,11 @@ def new_lead_id(prefix: str = "ld") -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
+def new_job_id(prefix: str = "job") -> str:
+    """Return a new, stable pipeline-job identifier (`jobId`)."""
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+
 def utc_now_iso() -> str:
     """Current UTC time as an ISO-8601 string (second precision)."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()

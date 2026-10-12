@@ -9,15 +9,46 @@ import pytest
 # (which pytest adds via pythonpath in pytest.ini).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.sheets.repository import LeadStore  # noqa: E402
-from app.sheets.schemas import IG_LEADS_HEADERS  # noqa: E402
+from app.sheets.repository import JobStore, LeadStore  # noqa: E402
+from app.sheets.schemas import (  # noqa: E402
+    ENRICHED_HEADERS,
+    IG_LEADS_HEADERS,
+    PIPELINE_JOBS_HEADERS,
+)
 from fakes import FakeSheetsClient  # noqa: E402
 
 
 @pytest.fixture
 def ig_client() -> FakeSheetsClient:
-    """A fake client with an `IG Leads` tab that has the canonical header row."""
-    return FakeSheetsClient({"IG Leads": [list(IG_LEADS_HEADERS)]})
+    """A fake client with the canonical `IG Leads` and `Pipeline Jobs` headers."""
+    return FakeSheetsClient(
+        {
+            "IG Leads": [list(IG_LEADS_HEADERS)],
+            "Pipeline Jobs": [list(PIPELINE_JOBS_HEADERS)],
+        }
+    )
+
+
+@pytest.fixture
+def worker_stores():
+    """Stores sharing one fake client, including the enriched tab."""
+    from types import SimpleNamespace
+
+    from app.sheets.repository import SheetStore
+
+    client = FakeSheetsClient(
+        {
+            "IG Leads": [list(IG_LEADS_HEADERS)],
+            "Pipeline Jobs": [list(PIPELINE_JOBS_HEADERS)],
+            "instagram_leads_enriched": [list(ENRICHED_HEADERS)],
+        }
+    )
+    return SimpleNamespace(
+        client=client,
+        lead=LeadStore(client),
+        jobs=JobStore(client),
+        enriched=SheetStore(client),
+    )
 
 
 @pytest.fixture
@@ -26,20 +57,25 @@ def lead_store(ig_client: FakeSheetsClient) -> LeadStore:
 
 
 @pytest.fixture
+def job_store(ig_client: FakeSheetsClient) -> JobStore:
+    return JobStore(ig_client)
+
+
+@pytest.fixture
 def api_store(ig_client: FakeSheetsClient) -> LeadStore:
     return LeadStore(ig_client, tab_names={"ig_leads": "IG Leads"})
 
 
 @pytest.fixture
-def api_client(api_store: LeadStore):
-    """A FastAPI TestClient whose lead service is backed by the fake store."""
+def api_client(api_store: LeadStore, job_store: JobStore):
+    """A FastAPI TestClient whose lead service is backed by the fake stores."""
     from fastapi.testclient import TestClient
 
     from app.dependencies import get_lead_service
     from app.leads.service import LeadService
     from app.main import app
 
-    service = LeadService(api_store)
+    service = LeadService(api_store, job_store=job_store)
     app.dependency_overrides[get_lead_service] = lambda: service
     with TestClient(app) as client:
         yield client

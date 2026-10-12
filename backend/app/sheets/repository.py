@@ -1,4 +1,4 @@
-"""Repository layer over a spreadsheet.
+﻿"""Repository layer over a spreadsheet.
 
 `SheetStore` provides schema-driven, header-name-based read/write access to the
 configured tabs. All mutating operations are serialized through a single
@@ -11,8 +11,17 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from app.config import Settings
+from app.constants import (
+    JOB_ACTIVE_STATUSES,
+    JOB_DONE,
+    JOB_ERROR,
+    JOB_QUEUED,
+    JOB_RETRY,
+    JOB_RUNNING,
+)
 
 from .client import GoogleSheetsClient, SheetsClient
 from .errors import (
@@ -21,18 +30,19 @@ from .errors import (
     SheetTabMissingError,
     SheetsNotFoundError,
 )
-from .models import Lead, SheetModel
+from .models import Lead, PipelineJob, SheetModel
 from .schemas import (
     KEY_DEDUP,
     KEY_ENRICHED,
     KEY_IG_LEADS,
+    KEY_JOBS,
     KEY_OUTREACH,
     SCHEMAS,
     SheetSchema,
     normalize_username,
     schema_for,
 )
-from .util import new_lead_id, stringify, utc_now_iso
+from .util import new_job_id, new_lead_id, stringify, utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +94,13 @@ class SchemaReport:
     note: str = ""
 
 
-def _tab_names_from_settings(settings: Settings) -> dict[str, str]:
+def tab_names_from_settings(settings: Settings) -> dict[str, str]:
     return {
         KEY_IG_LEADS: settings.google_sheets_ig_leads_tab,
         KEY_DEDUP: settings.google_sheets_dedup_tab,
         KEY_ENRICHED: settings.google_sheets_enriched_tab,
         KEY_OUTREACH: settings.google_sheets_outreach_tab,
+        KEY_JOBS: settings.google_sheets_jobs_tab,
     }
 
 
@@ -114,7 +125,7 @@ class SheetStore:
     @classmethod
     def from_settings(cls, settings: Settings) -> "SheetStore":
         client = GoogleSheetsClient.from_settings(settings)
-        return cls(client, tab_names=_tab_names_from_settings(settings))
+        return cls(client, tab_names=tab_names_from_settings(settings))
 
     # -- schema / layout ----------------------------------------------------
 
@@ -283,6 +294,39 @@ class SheetStore:
             layout = self.get_layout(key)
             rows = [self._model_to_row(layout, model) for model in models]
             self._client.append_rows(layout.tab, rows)
+
+    def upsert_model(
+        self, key: str, model: SheetModel, *, key_header: str | None = None
+    ) -> bool:
+        """Insert or update a row keyed by ``key_header``; returns True if appended.
+
+        Only columns known to the model are written, so unknown/extra columns in
+        the sheet are preserved. Idempotent: re-running with the same values is a
+        no-op write.
+        """
+        with self._lock:
+            layout = self.get_layout(key)
+            target_header = key_header or layout.schema.key_header
+            dumped = model.model_dump(by_alias=True)
+            key_value = stringify(dumped.get(target_header, ""))
+            row_number = (
+                self._find_row_number(layout, target_header, key_value)
+                if key_value
+                else None
+            )
+
+            index = layout.header_index
+            if row_number is None:
+                self._client.append_rows(layout.tab, [self._model_to_row(layout, model)])
+                return True
+
+            updates = [
+                (row_number, index[header], stringify(value))
+                for header, value in dumped.items()
+                if header in index
+            ]
+            self._client.update_cells(layout.tab, updates)
+            return False
 
     def update_by_key(
         self,
@@ -467,4 +511,222 @@ class LeadStore(SheetStore):
     @classmethod
     def from_settings(cls, settings: Settings) -> "LeadStore":
         client = GoogleSheetsClient.from_settings(settings)
-        return cls(client, tab_names=_tab_names_from_settings(settings))
+        return cls(client, tab_names=tab_names_from_settings(settings))
+
+
+def _iso_after(seconds: float) -> str:
+    moment = datetime.now(timezone.utc) + timedelta(seconds=max(0.0, seconds))
+    return moment.replace(microsecond=0).isoformat()
+
+
+def _to_int(value: object) -> int:
+    try:
+        return int(str(value).strip() or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+class JobStore(SheetStore):
+    """Repository for the `Pipeline Jobs` tab.
+
+    Coordinates the worker: enqueue (idempotent per ``(stage, leadId)``), claim
+    one eligible job, complete or fail it. Claiming and status transitions happen
+    under the shared write lock so a single worker cannot double-claim.
+    """
+
+    SCHEMA_KEY = KEY_JOBS
+
+    def find_job(self, stage: str, lead_id: str) -> PipelineJob | None:
+        for record in self.read_rows(self.SCHEMA_KEY):
+            values = record.values
+            if values.get("stage") == stage and values.get("leadId") == lead_id:
+                return PipelineJob.model_validate(values)
+        return None
+
+    def enqueue(
+        self,
+        stage: str,
+        lead_id: str,
+        username: str,
+        username_normalized: str,
+        *,
+        payload: str = "",
+        priority: int = 0,
+        max_attempts: int = 3,
+        on_duplicate: str = "skip",
+    ) -> tuple[bool, PipelineJob]:
+        """Enqueue a job. Returns ``(created, job)``.
+
+        ``on_duplicate="skip"`` (default) returns the existing job unchanged.
+        ``on_duplicate="reenqueue"`` resets a finished/failed job back to queued.
+        """
+        with self._lock:
+            existing = self.find_job(stage, lead_id)
+            if existing is not None:
+                if on_duplicate == "reenqueue" and existing.status in (
+                    JOB_DONE,
+                    JOB_ERROR,
+                    JOB_RETRY,
+                ):
+                    self.update_by_key(
+                        self.SCHEMA_KEY,
+                        existing.job_id,
+                        {
+                            "status": JOB_QUEUED,
+                            "attemptCount": 0,
+                            "runAfter": "",
+                            "lastError": "",
+                            "result": "",
+                            "lockedAt": "",
+                            "lockedBy": "",
+                        },
+                    )
+                    existing = self.find_job(stage, lead_id) or existing
+                return (False, existing)
+
+            now = utc_now_iso()
+            job = PipelineJob(
+                jobId=new_job_id(),
+                stage=stage,
+                leadId=lead_id,
+                username=username,
+                usernameNormalized=username_normalized,
+                status=JOB_QUEUED,
+                attemptCount=0,
+                maxAttempts=max_attempts,
+                priority=priority,
+                payload=payload,
+                createdAt=now,
+                updatedAt=now,
+            )
+            self.append_model(self.SCHEMA_KEY, job)
+            logger.info("Enqueued job %s (%s @%s)", job.job_id, stage, username_normalized)
+            return (True, job)
+
+    def claim_next(
+        self, *, worker_id: str = "", now: str | None = None
+    ) -> PipelineJob | None:
+        """Atomically claim the highest-priority eligible job, or None."""
+        with self._lock:
+            layout = self.get_layout(self.SCHEMA_KEY)
+            index = layout.header_index
+            current = now or utc_now_iso()
+            rows = self.read_rows(self.SCHEMA_KEY)
+
+            eligible = [
+                record
+                for record in rows
+                if record.values.get("status") in JOB_ACTIVE_STATUSES
+                and (not record.values.get("runAfter") or record.values["runAfter"] <= current)
+            ]
+            if not eligible:
+                return None
+
+            eligible.sort(
+                key=lambda record: (
+                    -_to_int(record.values.get("priority")),
+                    record.values.get("createdAt", ""),
+                    record.row_number,
+                )
+            )
+            chosen = eligible[0]
+            attempt = _to_int(chosen.values.get("attemptCount")) + 1
+
+            self._client.update_cells(
+                layout.tab,
+                [
+                    (chosen.row_number, index["status"], JOB_RUNNING),
+                    (chosen.row_number, index["attemptCount"], str(attempt)),
+                    (chosen.row_number, index["lockedAt"], current),
+                    (chosen.row_number, index["lockedBy"], worker_id),
+                    (chosen.row_number, index["updatedAt"], current),
+                ],
+            )
+            claimed = {**chosen.values, "status": JOB_RUNNING, "attemptCount": attempt,
+                       "lockedAt": current, "lockedBy": worker_id, "updatedAt": current}
+            return PipelineJob.model_validate(claimed)
+
+    def complete(self, job: PipelineJob, result: str = "") -> None:
+        self.update_by_key(
+            self.SCHEMA_KEY,
+            job.job_id,
+            {
+                "status": JOB_DONE,
+                "result": result[:1000],
+                "lastError": "",
+                "lockedAt": "",
+                "lockedBy": "",
+                "runAfter": "",
+            },
+        )
+
+    def fail(
+        self,
+        job: PipelineJob,
+        error: str,
+        *,
+        retryable: bool,
+        backoff_base: float = 60.0,
+        backoff_max: float = 3600.0,
+    ) -> str:
+        """Record a failed job. Returns the resulting status (retry/error)."""
+        if retryable and job.attempt_count < job.max_attempts:
+            status = JOB_RETRY
+            attempt = max(1, job.attempt_count)
+            delay = min(backoff_max, backoff_base * (2 ** (attempt - 1)))
+            run_after = _iso_after(delay)
+        else:
+            status = JOB_ERROR
+            run_after = ""
+        self.update_by_key(
+            self.SCHEMA_KEY,
+            job.job_id,
+            {
+                "status": status,
+                "lastError": error[:1000],
+                "runAfter": run_after,
+                "lockedAt": "",
+                "lockedBy": "",
+            },
+        )
+        return status
+
+    def recover_stale_jobs(self, stale_after_minutes: int = 30) -> int:
+        """Return interrupted `running` jobs to `retry` (restart recovery)."""
+        with self._lock:
+            layout = self.get_layout(self.SCHEMA_KEY)
+            index = layout.header_index
+            now = utc_now_iso()
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(minutes=max(0, stale_after_minutes))
+            ).replace(microsecond=0).isoformat()
+
+            updates: list[tuple[int, int, str]] = []
+            recovered = 0
+            for record in self.read_rows(self.SCHEMA_KEY):
+                if record.values.get("status") != JOB_RUNNING:
+                    continue
+                locked_at = record.values.get("lockedAt", "")
+                if locked_at and locked_at >= cutoff:
+                    continue  # still fresh; another worker may be on it
+                updates.extend(
+                    [
+                        (record.row_number, index["status"], JOB_RETRY),
+                        (record.row_number, index["runAfter"], ""),
+                        (record.row_number, index["lockedAt"], ""),
+                        (record.row_number, index["lockedBy"], ""),
+                        (record.row_number, index["lastError"], "recovered after restart"),
+                        (record.row_number, index["updatedAt"], now),
+                    ]
+                )
+                recovered += 1
+
+            if updates:
+                self._client.update_cells(layout.tab, updates)
+                logger.info("Recovered %s stale running job(s)", recovered)
+            return recovered
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "JobStore":
+        client = GoogleSheetsClient.from_settings(settings)
+        return cls(client, tab_names=tab_names_from_settings(settings))

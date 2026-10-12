@@ -26,6 +26,7 @@ Schema keys are stable in code; tab display names are configurable via env vars.
 | `deduplicated_leads` | `GOOGLE_SHEETS_DEDUP_TAB` | `Deduplicated Leads` |
 | `instagram_leads_enriched` | `GOOGLE_SHEETS_ENRICHED_TAB` | `instagram_leads_enriched` |
 | `outreach` | `GOOGLE_SHEETS_OUTREACH_TAB` | `Outreach` |
+| `pipeline_jobs` | `GOOGLE_SHEETS_JOBS_TAB` | `Pipeline Jobs` |
 
 ### `IG Leads` (canonical)
 
@@ -64,6 +65,17 @@ then `createdAt, updatedAt`. Evidence columns are intentionally carried as
 leadId, username, usernameNormalized, channel, status, subject, body, model,
 generatedAt, createdAt, updatedAt, lastError
 ```
+
+### `Pipeline Jobs`
+
+```text
+jobId, stage, leadId, username, usernameNormalized, status, attemptCount,
+maxAttempts, priority, payload, result, lastError, lockedAt, lockedBy, runAfter,
+createdAt, updatedAt
+```
+
+The worker's queue. `(stage, leadId)` is the idempotency key; statuses are
+`queued`/`running`/`retry`/`done`/`error`. See [worker.md](worker.md).
 
 > `Sheet4` is still undefined/unverified and is intentionally not implemented.
 

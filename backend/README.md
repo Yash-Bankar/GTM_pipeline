@@ -11,7 +11,7 @@ backend/
 │  ├─ __init__.py
 │  ├─ config.py    Settings loaded from environment variables
 │  ├─ main.py      FastAPI app (health + lead API)
-│  ├─ worker.py    Worker entrypoint (stub for now)
+│  ├─ worker/      Autonomous worker (Phase 4)
 │  ├─ common/      Shared helpers (retry)
 │  ├─ leads/       Lead API (Phase 2)
 │  ├─ providers/   HikerAPI provider (Phase 3)
@@ -39,7 +39,7 @@ Health check: `Invoke-RestMethod http://127.0.0.1:8000/health`
 ## Run the worker
 
 ```powershell
-.\.venv\Scripts\python.exe app\worker.py --once
+.\.venv\Scripts\python.exe -m app.worker --drain
 ```
 
 ## Tests

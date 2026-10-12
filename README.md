@@ -32,7 +32,7 @@ synpo-gtm-automation/
 │  ├─ app/
 │  │  ├─ config.py    Settings loaded from environment
 │  │  ├─ main.py      FastAPI app (health + lead API)
-│  │  ├─ worker.py    Worker entrypoint (stub for now)
+│  │  ├─ worker/      Autonomous worker: poll/claim/run stages (Phase 4)
 │  │  ├─ common/      Shared helpers (retry)
 │  │  ├─ leads/       Lead API: validation, service, routes (Phase 2)
 │  │  ├─ providers/   HikerAPI client + normalization (Phase 3)
@@ -42,7 +42,8 @@ synpo-gtm-automation/
 │  ├─ architecture.md      Proposed architecture, data flow, phase boundaries
 │  ├─ sheets-contract.md   Google Sheets tab schemas and setup
 │  ├─ api.md               Lead API reference (Phase 2)
-│  └─ hikerapi.md          HikerAPI provider reference (Phase 3)
+│  ├─ hikerapi.md          HikerAPI provider reference (Phase 3)
+│  └─ worker.md            Autonomous worker reference (Phase 4)
 ├─ scripts/           Helper scripts (verify_sheets.py)
 ├─ tests/             Unit tests (mocked Sheets client)
 ├─ pytest.ini         Pytest configuration
@@ -163,6 +164,26 @@ normalization only). See [docs/hikerapi.md](docs/hikerapi.md).
 ```powershell
 .\backend\.venv\Scripts\python.exe scripts\check_hikerapi.py --username natgeo
 ```
+
+## Autonomous worker (Phase 4)
+
+Polls the `Pipeline Jobs` tab, claims one job, runs its stage, and persists
+progress (idempotent, retry-aware, restart-safe). See [docs/worker.md](docs/worker.md).
+
+Run the API and worker in **separate terminals**:
+
+```powershell
+# Terminal A - API
+cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal B - worker (from backend)
+cd backend
+.\.venv\Scripts\python.exe -m app.worker          # long-running poller
+.\.venv\Scripts\python.exe -m app.worker --drain  # run queued jobs then exit
+.\.venv\Scripts\python.exe -m app.worker --once   # process one job
+```
+
+One worker and one API instance only (spreadsheet-backed MVP).
 
 ## Documentation
 

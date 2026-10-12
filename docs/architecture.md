@@ -201,6 +201,9 @@ before its predecessor's exit criteria are met.
 - **Boundary:** no AI.
 - **Exit criteria:** pending handles become enriched rows with profile + website
   evidence; failures recorded.
+- **Status:** worker + `Pipeline Jobs` queue + `profile_fetch` stage implemented
+  in `backend/app/worker/` (see [worker.md](worker.md)). Website evidence is
+  still pending.
 
 ### Phase 5 — AI generation (Gemini)
 - **Deliverables:** Gemini client; dossier + personalized outreach prompts;
