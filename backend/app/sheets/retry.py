@@ -1,18 +1,19 @@
-"""Retry / exponential backoff helpers.
+"""Google Sheets retry helpers.
 
-Kept dependency-free and injectable (sleeper, random) so retry behaviour can be
-unit tested deterministically without real waits.
+The generic ``call_with_retry`` lives in ``app.common.retry`` and is re-exported
+here for backwards compatibility. This module adds Google-specific transient
+detection (``HttpError`` statuses, httplib2 transport errors).
 """
 
 from __future__ import annotations
 
-import random
-import time
 from typing import Callable, TypeVar
 
 from googleapiclient.errors import HttpError
 
 import httplib2
+
+from app.common.retry import call_with_retry as _call_with_retry
 
 T = TypeVar("T")
 
@@ -76,35 +77,9 @@ def is_retryable(exc: BaseException) -> bool:
 def call_with_retry(
     func: Callable[[], T],
     *,
-    max_attempts: int = 5,
-    backoff_base: float = 0.5,
-    backoff_max: float = 30.0,
-    sleeper: Callable[[float], None] = time.sleep,
-    rand: Callable[[], float] = random.random,
     retryable: Callable[[BaseException], bool] = is_retryable,
-    on_retry: Callable[[int, float, BaseException], None] | None = None,
+    **kwargs: object,
 ) -> T:
-    """Call ``func`` with exponential backoff on transient failures.
+    """Sheets wrapper: defaults to Google transient-error detection."""
+    return _call_with_retry(func, retryable=retryable, **kwargs)  # type: ignore[arg-type]
 
-    :param max_attempts: total attempts (>= 1).
-    :param backoff_base: base delay in seconds.
-    :param backoff_max: maximum delay in seconds.
-    :param sleeper: sleep function (injected for tests).
-    :param rand: random source in [0, 1) used for full jitter.
-    :param retryable: predicate deciding whether an exception is transient.
-    :param on_retry: optional callback ``(attempt, delay, exc)`` before sleeping.
-    """
-    attempts = max(1, int(max_attempts))
-    attempt = 0
-    while True:
-        attempt += 1
-        try:
-            return func()
-        except Exception as exc:  # noqa: BLE001 - re-raised below
-            if attempt >= attempts or not retryable(exc):
-                raise
-            ceiling = min(backoff_max, backoff_base * (2 ** (attempt - 1)))
-            delay = ceiling * rand()
-            if on_retry is not None:
-                on_retry(attempt, delay, exc)
-            sleeper(delay)

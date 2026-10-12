@@ -10,8 +10,11 @@ backend/
 ├─ app/
 │  ├─ __init__.py
 │  ├─ config.py    Settings loaded from environment variables
-│  ├─ main.py      FastAPI app (health check only for now)
+│  ├─ main.py      FastAPI app (health + lead API)
 │  ├─ worker.py    Worker entrypoint (stub for now)
+│  ├─ common/      Shared helpers (retry)
+│  ├─ leads/       Lead API (Phase 2)
+│  ├─ providers/   HikerAPI provider (Phase 3)
 │  └─ sheets/      Google Sheets storage layer (Phase 1)
 ├─ requirements.txt
 └─ .venv/          local virtual environment (gitignored)

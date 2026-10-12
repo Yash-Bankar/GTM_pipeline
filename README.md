@@ -33,13 +33,16 @@ synpo-gtm-automation/
 │  │  ├─ config.py    Settings loaded from environment
 │  │  ├─ main.py      FastAPI app (health + lead API)
 │  │  ├─ worker.py    Worker entrypoint (stub for now)
+│  │  ├─ common/      Shared helpers (retry)
 │  │  ├─ leads/       Lead API: validation, service, routes (Phase 2)
+│  │  ├─ providers/   HikerAPI client + normalization (Phase 3)
 │  │  └─ sheets/      Google Sheets storage layer (Phase 1)
 │  └─ requirements.txt
 ├─ docs/
 │  ├─ architecture.md      Proposed architecture, data flow, phase boundaries
 │  ├─ sheets-contract.md   Google Sheets tab schemas and setup
-│  └─ api.md               Lead API reference (Phase 2)
+│  ├─ api.md               Lead API reference (Phase 2)
+│  └─ hikerapi.md          HikerAPI provider reference (Phase 3)
 ├─ scripts/           Helper scripts (verify_sheets.py)
 ├─ tests/             Unit tests (mocked Sheets client)
 ├─ pytest.ini         Pytest configuration
@@ -151,6 +154,15 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/leads?limit=20&q=crypto&status=q
 
 Endpoints: `POST /api/v1/leads`, `GET /api/v1/leads`, `GET /api/v1/leads/{leadId}`,
 plus `GET /health`. New leads are stored with `status="queued"` for the worker.
+
+## HikerAPI provider (Phase 3)
+
+Typed client for fetching a public Instagram profile (profile fetch +
+normalization only). See [docs/hikerapi.md](docs/hikerapi.md).
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\check_hikerapi.py --username natgeo
+```
 
 ## Documentation
 

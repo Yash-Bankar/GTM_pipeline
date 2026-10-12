@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Instagram data provider (HikerAPI)
     hikerapi_base_url: str = "https://api.hikerapi.com/v2"
     hikerapi_key: str = ""
+    hikerapi_timeout_seconds: float = 20.0
+    hikerapi_max_attempts: int = 4
+    hikerapi_backoff_base_seconds: float = 0.5
+    hikerapi_backoff_max_seconds: float = 10.0
 
     # AI provider (Google Gemini)
     gemini_api_key: str = ""

@@ -182,18 +182,25 @@ before its predecessor's exit criteria are met.
 - **Status:** implemented in `backend/app/leads/` + `backend/app/main.py`. See
   [api.md](api.md).
 
-### Phase 3 — Instagram enrichment (HikerAPI)
-- **Deliverables:** HikerAPI client (ported/refactored from legacy, not copied);
-  profile → enriched row mapping; worker stage to enrich `Deduplicated Leads` →
-  `instagram_leads_enriched`; rate limiting; per-row error handling.
-- **Boundary:** no website crawling, no AI.
-- **Exit criteria:** pending handles become enriched rows idempotently.
+### Phase 3 — HikerAPI provider (profile fetch + normalization)
+- **Deliverables:** typed HikerAPI client (`GET /v2/user/by/username`,
+  `x-access-key`); input validation; normalized `HikerProfile`; `to_lead_fields`
+  mapping; timeouts; bounded retries; typed errors; mocked-response tests; a
+  manual check script.
+- **Boundary:** provider only — no worker wiring, no recent-media research, no
+  website crawling, no AI.
+- **Exit criteria:** one approved public profile can be fetched and normalized.
+- **Status:** implemented in `backend/app/providers/`. See
+  [hikerapi.md](hikerapi.md).
 
-### Phase 4 — Website enrichment
-- **Deliverables:** link-in-bio/site crawler; email extraction; evidence columns
-  written to `instagram_leads_enriched`.
+### Phase 4 — Enrichment worker (HikerAPI write-back + website evidence)
+- **Deliverables:** worker stage that reads pending `Deduplicated Leads`, calls
+  the HikerAPI provider, and writes results to `instagram_leads_enriched`
+  idempotently; website/link-in-bio crawler and email extraction adding evidence
+  columns; rate limiting; per-row error handling.
 - **Boundary:** no AI.
-- **Exit criteria:** enriched rows include website evidence; failures recorded.
+- **Exit criteria:** pending handles become enriched rows with profile + website
+  evidence; failures recorded.
 
 ### Phase 5 — AI generation (Gemini)
 - **Deliverables:** Gemini client; dossier + personalized outreach prompts;

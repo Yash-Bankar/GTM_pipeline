@@ -91,6 +91,21 @@ versions.
 - Map storage failures to HTTP via the handlers in `main.py` (503 config/quota,
   502 other Sheets errors).
 
+## External provider rules (Phase 3)
+
+- Providers live in `backend/app/providers/`; HikerAPI reference in
+  [docs/hikerapi.md](docs/hikerapi.md).
+- Use the current documented endpoint/header:
+  `GET /v2/user/by/username` with `x-access-key`; keys stay server-side and are
+  never logged or returned.
+- Return typed models (`HikerProfile`); never let raw provider field names leak
+  past `parse_profile_payload`.
+- Validate input (`parse_lead_input`) before making any HTTP call.
+- Configure timeouts and bounded retries; reuse `app.common.retry.call_with_retry`.
+- Raise the typed `HikerAPI*` errors; do not swallow them.
+- Phase 3 scope: profile fetch + normalization only. Do not add recent-media
+  research, website crawling, or Gemini here.
+
 ## Commands
 
 ```powershell
@@ -108,6 +123,9 @@ cd backend; .\.venv\Scripts\python.exe -m app.worker --once; cd ..
 
 # Sheets storage integration check (needs .env + service account)
 .\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --check-only
+
+# HikerAPI manual profile check (needs HIKERAPI_KEY)
+.\backend\.venv\Scripts\python.exe scripts\check_hikerapi.py --username natgeo
 
 # Frontend
 cd frontend; npm run lint; npx tsc --noEmit; npm run build
