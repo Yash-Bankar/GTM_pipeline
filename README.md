@@ -30,13 +30,17 @@ synpo-gtm-automation/
 ├─ frontend/          Next.js app (App Router, TS, Tailwind)
 ├─ backend/           FastAPI app + background worker (Python)
 │  ├─ app/
+│  │  ├─ config.py    Settings loaded from environment
 │  │  ├─ main.py      FastAPI entrypoint (health check only for now)
-│  │  └─ worker.py    Worker entrypoint (stub for now)
+│  │  ├─ worker.py    Worker entrypoint (stub for now)
+│  │  └─ sheets/      Google Sheets storage layer (Phase 1)
 │  └─ requirements.txt
 ├─ docs/
-│  └─ architecture.md Proposed architecture, data flow, phase boundaries
-├─ scripts/           PowerShell helper scripts (empty for now)
-├─ tests/             Test suite (empty for now)
+│  ├─ architecture.md      Proposed architecture, data flow, phase boundaries
+│  └─ sheets-contract.md   Google Sheets tab schemas and setup
+├─ scripts/           Helper scripts (verify_sheets.py)
+├─ tests/             Unit tests (mocked Sheets client)
+├─ pytest.ini         Pytest configuration
 ├─ .env.example       Environment variable template (safe placeholders)
 ├─ CLAUDE.md          Agent/contributor guidance for this repo
 └─ README.md
@@ -102,6 +106,28 @@ cd frontend
 npm run lint
 npx tsc --noEmit
 npm run build
+```
+
+## Google Sheets storage (Phase 1)
+
+Google Sheets is the source of truth; there is no database. The storage adapter
+is in `backend/app/sheets/` and maps rows to typed models by header name. See
+[docs/sheets-contract.md](docs/sheets-contract.md) for the tab schemas, identity
+rules, and the non-destructive header policy.
+
+Run the unit tests (in-memory fake client, no credentials needed):
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest
+```
+
+Verify your development spreadsheet (requires `secrets/service-account.json` and
+`.env`):
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --check-only
+.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --create-missing-tabs --extend-headers
+.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --write-test-row
 ```
 
 ## Documentation

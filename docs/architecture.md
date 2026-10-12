@@ -166,6 +166,9 @@ before its predecessor's exit criteria are met.
 - **Boundary:** no scraping, no AI.
 - **Exit criteria:** can list/read/append rows and update status cells against a
   test spreadsheet; headers validated.
+- **Status:** implemented in `backend/app/sheets/`. Contract, identity rules and
+  the non-destructive header policy are documented in
+  [sheets-contract.md](sheets-contract.md).
 
 ### Phase 2 — Instagram enrichment (HikerAPI)
 - **Deliverables:** HikerAPI client (ported/refactored from legacy, not copied);

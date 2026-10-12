@@ -23,6 +23,7 @@ lxml>=5.0
 google-api-python-client>=2.201
 google-auth>=2.61
 google-auth-httplib2>=0.4
+httplib2>=0.22
 
 # AI generation (Gemini)
 google-genai>=2.29

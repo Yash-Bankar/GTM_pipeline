@@ -61,6 +61,20 @@ versions.
   (added in Phase 1) — never hardcode environment-specific values.
 - Windows-first: provide PowerShell commands in docs and scripts.
 
+## Google Sheets storage rules (Phase 1)
+
+- The Sheets adapter is `backend/app/sheets/`. Tab schemas, identity rules, and
+  the non-destructive header policy are in
+  [docs/sheets-contract.md](docs/sheets-contract.md).
+- Map rows by **header name**, never by fixed column index.
+- `leadId` is the stable internal identifier; `usernameNormalized` is the dedup
+  key. Use `LeadStore.create_lead(...)` rather than writing rows by hand.
+- Never overwrite an existing header row or unrelated cells; use targeted,
+  header-named updates.
+- One backend instance / one worker only: mutations are serialized in-process.
+  Do not add a concurrent job claimer until a Sheets-based lease exists.
+- Do not call HikerAPI, Gemini, or scrape websites from the storage layer.
+
 ## Commands
 
 ```powershell
@@ -75,6 +89,9 @@ cd backend; .\.venv\Scripts\python.exe -m app.worker --once; cd ..
 
 # Python tests
 .\backend\.venv\Scripts\python.exe -m pytest
+
+# Sheets storage integration check (needs .env + service account)
+.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --check-only
 
 # Frontend
 cd frontend; npm run lint; npx tsc --noEmit; npm run build

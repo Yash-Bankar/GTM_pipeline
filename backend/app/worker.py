@@ -3,6 +3,10 @@
 Foundation only: a runnable stub. The worker will poll Google Sheets for pending
 work and run the enrichment/generation stages in later phases (see
 docs/architecture.md).
+
+Concurrency: run exactly **one** worker instance. Job state lives in Google
+Sheets, and there is no concurrent job claimer in the MVP; multiple workers would
+race on the same rows. A Sheets-based lease is a later phase.
 """
 
 from __future__ import annotations

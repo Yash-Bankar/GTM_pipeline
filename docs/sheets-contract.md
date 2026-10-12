@@ -1,0 +1,147 @@
+# Google Sheets Data Contract (Phase 1)
+
+Google Sheets is the **single source of truth** for all operational data in this
+MVP. There is no SQL/NoSQL database.
+
+The storage layer lives in `backend/app/sheets/` and maps rows to typed Pydantic
+models **by header name** (never by fixed column index).
+
+## Credentials model
+
+- Server-side **service account** credentials (no user OAuth for the MVP).
+- JSON key path comes from `GOOGLE_APPLICATION_CREDENTIALS` (see `.env.example`).
+- Relative paths resolve against the repo root, then the backend directory, so
+  both `secrets/service-account.json` and `backend/secrets/service-account.json`
+  work.
+- The key file lives under `secrets/` (gitignored) and is never logged or printed.
+- The spreadsheet must be shared with the service account email (Editor).
+
+## Tabs and schemas
+
+Schema keys are stable in code; tab display names are configurable via env vars.
+
+| Schema key | Env var (tab name) | Default tab |
+| --- | --- | --- |
+| `ig_leads` | `GOOGLE_SHEETS_IG_LEADS_TAB` | `IG Leads` |
+| `deduplicated_leads` | `GOOGLE_SHEETS_DEDUP_TAB` | `Deduplicated Leads` |
+| `instagram_leads_enriched` | `GOOGLE_SHEETS_ENRICHED_TAB` | `instagram_leads_enriched` |
+| `outreach` | `GOOGLE_SHEETS_OUTREACH_TAB` | `Outreach` |
+
+### `IG Leads` (canonical)
+
+```text
+leadId, username, usernameNormalized, fullName, instagramId, followerCount,
+followsCount, businessCategoryName, bio, businessEmail, businessPhoneNumber,
+profileUrl, externalUrl, allExternalUrls, engagementRate, scrapedAt, status,
+source, createdAt, updatedAt, lastError
+```
+
+### `Deduplicated Leads`
+
+```text
+leadId, username, usernameNormalized, status, reason, sourceLeadId, createdAt, updatedAt
+```
+
+### `instagram_leads_enriched`
+
+Core:
+
+```text
+leadId, username, usernameNormalized, fullName, instagramId, followerCount,
+followsCount, businessCategoryName, bio, businessEmail, businessPhoneNumber,
+profileUrl, externalUrl, allExternalUrls, engagementRate, profileStatus,
+websiteStatus, profileScrapedAt, websiteScrapedAt, lastError
+```
+
+Website evidence slots (`scrape1Url`, `scrape1Title`, `scrape1Text`,
+`scrape1Links` ... `scrape5Url`, `scrape5Title`, `scrape5Text`, `scrape5Links`),
+then `createdAt, updatedAt`. Evidence columns are intentionally carried as
+**extra** model fields so their count can grow without a code change.
+
+### `Outreach`
+
+```text
+leadId, username, usernameNormalized, channel, status, subject, body, model,
+generatedAt, createdAt, updatedAt, lastError
+```
+
+> `Sheet4` is still undefined/unverified and is intentionally not implemented.
+
+## Identity and deduplication
+
+- **`leadId`** is the stable internal identifier (`ld_<uuid hex>`), assigned once
+  when a lead is created and used as the key across every tab.
+- **`usernameNormalized`** is the dedup key: lowercase, no leading `@`, URL forms
+  (`instagram.com/<handle>`, query/hash/trailing slash) reduced to the handle.
+- `LeadStore.create_lead(...)` generates the id/timestamps and rejects duplicates
+  (or returns the existing lead with `on_duplicate="return"`).
+
+## Non-destructive header policy
+
+- Missing tab: created with the full canonical header row (only when asked).
+- Empty tab: full header row written.
+- Existing header row: **never overwritten**. Missing required headers are
+  reported; they are appended only when `extend_headers=True`, filling blank
+  header cells first, then appending — existing cells are never touched.
+- Row updates are **targeted cell updates by header name**, so unknown/extra
+  columns are preserved.
+
+## Reliability
+
+- Batch reads (`batchGet`) and batch writes (`batchUpdate`) where possible.
+- Per-request timeout via `GOOGLE_SHEETS_REQUEST_TIMEOUT_SECONDS`.
+- Exponential backoff with full jitter on transient errors (429/5xx and
+  transport timeouts): `GOOGLE_SHEETS_MAX_ATTEMPTS`,
+  `GOOGLE_SHEETS_BACKOFF_BASE_SECONDS`, `GOOGLE_SHEETS_BACKOFF_MAX_SECONDS`.
+- Typed errors: `SheetsAuthError`, `SheetsPermissionError`, `SheetsQuotaError`,
+  `SheetsNetworkError`, `SheetsNotFoundError`, `SheetTabMissingError`,
+  `SchemaError`, `DuplicateLeadError`, `SheetsApiError`.
+
+## Concurrency model (MVP)
+
+- **One backend instance, one background worker.** Mutating operations are
+  serialized by an in-process lock (`SheetStore._lock`), and there is no
+  concurrent job claimer. Do not run multiple workers or API replicas until a
+  Sheets-based lease is introduced (later phase).
+- Worker and API coordinate through Sheets status columns, not a database.
+
+## Setup
+
+1. In Google Cloud, create/select a project and enable the **Google Sheets API**.
+2. Create a **service account**, create a **JSON key**, and save it to
+   `backend/secrets/service-account.json` (gitignored).
+3. Share the target spreadsheet with the service account email as **Editor**.
+4. Configure `.env` (copy from `.env.example`):
+
+   ```powershell
+   Copy-Item .env.example .env
+   # Set GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_APPLICATION_CREDENTIALS, tab names
+   ```
+
+## Tests and verification
+
+Unit tests use an in-memory fake Sheets client — no network, no credentials:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest
+```
+
+Integration check against the development spreadsheet (reads/writes a test row):
+
+```powershell
+# Inspect tabs and headers (read-only)
+.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --check-only
+
+# Create missing tabs / append missing headers (non-destructive)
+.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --create-missing-tabs --extend-headers
+
+# Append a test lead to IG Leads and read it back
+.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --write-test-row
+```
+
+Credentials are never printed; the spreadsheet id is masked in output.
+
+## Out of scope for Phase 1
+
+No HikerAPI calls, no Gemini calls, no website scraping, and no dedup/enrichment
+business logic — Phase 1 is storage only.
