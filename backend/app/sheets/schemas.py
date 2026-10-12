@@ -11,6 +11,7 @@ from typing import Type
 
 from .models import (
     DedupLead,
+    Dossier,
     EnrichedLead,
     Lead,
     LeadPost,
@@ -28,6 +29,7 @@ KEY_OUTREACH = "outreach"
 KEY_JOBS = "pipeline_jobs"
 KEY_POSTS = "lead_posts"
 KEY_WEBSITE_PAGES = "website_pages"
+KEY_DOSSIERS = "dossiers"
 
 
 def scrape_headers(max_slots: int = 5) -> list[str]:
@@ -118,11 +120,33 @@ OUTREACH_HEADERS: tuple[str, ...] = (
     "status",
     "subject",
     "body",
+    "dmBody",
     "model",
     "generatedAt",
     "createdAt",
     "updatedAt",
     "lastError",
+)
+
+DOSSIERS_HEADERS: tuple[str, ...] = (
+    "leadId",
+    "username",
+    "usernameNormalized",
+    "summary",
+    "topics",
+    "audience",
+    "evidenceUrls",
+    "qualificationScore",
+    "qualificationTier",
+    "rubric",
+    "criterionScores",
+    "uncertainty",
+    "model",
+    "status",
+    "lastError",
+    "generatedAt",
+    "createdAt",
+    "updatedAt",
 )
 
 PIPELINE_JOBS_HEADERS: tuple[str, ...] = (
@@ -254,6 +278,13 @@ SCHEMAS: dict[str, SheetSchema] = {
         headers=WEBSITE_PAGES_HEADERS,
         key_header="pageId",
         model=WebsitePage,
+    ),
+    KEY_DOSSIERS: SheetSchema(
+        key=KEY_DOSSIERS,
+        default_tab="Dossiers",
+        headers=DOSSIERS_HEADERS,
+        key_header="leadId",
+        model=Dossier,
     ),
 }
 

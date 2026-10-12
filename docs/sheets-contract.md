@@ -29,6 +29,7 @@ Schema keys are stable in code; tab display names are configurable via env vars.
 | `pipeline_jobs` | `GOOGLE_SHEETS_JOBS_TAB` | `Pipeline Jobs` |
 | `lead_posts` | `GOOGLE_SHEETS_POSTS_TAB` | `Lead Posts` |
 | `website_pages` | `GOOGLE_SHEETS_WEBSITE_PAGES_TAB` | `Website Pages` |
+| `dossiers` | `GOOGLE_SHEETS_DOSSIERS_TAB` | `Dossiers` |
 
 ### `IG Leads` (canonical)
 
@@ -67,9 +68,23 @@ then `createdAt, updatedAt`. Evidence columns are intentionally carried as
 ### `Outreach`
 
 ```text
-leadId, username, usernameNormalized, channel, status, subject, body, model,
-generatedAt, createdAt, updatedAt, lastError
+leadId, username, usernameNormalized, channel, status, subject, body, dmBody,
+model, generatedAt, createdAt, updatedAt, lastError
 ```
+
+AI outreach drafts (Phase 6). `subject`/`body` = email, `dmBody` = DM. Drafts are
+stored with `status=NEEDS_REVIEW`; nothing is sent. See [gemini.md](gemini.md).
+
+### `Dossiers`
+
+```text
+leadId, username, usernameNormalized, summary, topics, audience, evidenceUrls,
+qualificationScore, qualificationTier, rubric, criterionScores, uncertainty,
+model, status, lastError, generatedAt, createdAt, updatedAt
+```
+
+One AI dossier per lead (Phase 6), keyed by `leadId`, `status=NEEDS_REVIEW`.
+See [gemini.md](gemini.md).
 
 ### `Pipeline Jobs`
 

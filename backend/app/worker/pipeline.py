@@ -18,8 +18,15 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app import constants
+from app.ai import AIService, Evidence, build_evidence
+from app.ai.service import DossierResult
 from app.leads.validation import InvalidLeadInput
 from app.providers.errors import (
+    AIConfigError,
+    AIError,
+    AINetworkError,
+    AIRateLimitError,
+    AIResponseError,
     HikerAPIAuthError,
     HikerAPIConfigError,
     HikerAPIError,
@@ -31,11 +38,20 @@ from app.providers.errors import (
 )
 from app.providers.models import HikerPost, HikerProfile, to_lead_fields
 from app.providers.website import FetchedPage
-from app.sheets.models import EnrichedLead, LeadPost, PipelineJob, WebsitePage
+from app.sheets.models import (
+    Dossier,
+    EnrichedLead,
+    LeadPost,
+    OutreachEntry,
+    PipelineJob,
+    WebsitePage,
+)
 from app.sheets.repository import JobStore, LeadStore, SheetStore
 from app.sheets.schemas import (
+    KEY_DOSSIERS,
     KEY_ENRICHED,
     KEY_IG_LEADS,
+    KEY_OUTREACH,
     KEY_POSTS,
     KEY_WEBSITE_PAGES,
     normalize_username,
@@ -109,12 +125,14 @@ class ProfileFetchStage:
         *,
         job_store: JobStore | None = None,
         followup_max_attempts: int = 3,
+        enable_ai: bool = False,
     ) -> None:
         self._client = client
         self._lead_store = lead_store
         self._enriched_store = enriched_store
         self._job_store = job_store
         self._followup_max_attempts = followup_max_attempts
+        self._enable_ai = enable_ai
 
     def run(self, job: PipelineJob) -> StageOutcome:
         username = job.username_normalized or job.username
@@ -174,6 +192,16 @@ class ProfileFetchStage:
                 profile.username,
                 job.username_normalized or profile.username,
                 max_attempts=self._followup_max_attempts,
+            )
+        if self._enable_ai:
+            # Lower priority so media/website evidence is gathered first.
+            self._job_store.enqueue(
+                constants.STAGE_AI_DOSSIER,
+                job.lead_id,
+                profile.username,
+                job.username_normalized or profile.username,
+                max_attempts=self._followup_max_attempts,
+                priority=-1,
             )
 
     # -- persistence --------------------------------------------------------
@@ -420,3 +448,234 @@ def _serialize_links(links: list[dict]) -> str:
         if url:
             lines.append(f"{label} | {url}".strip(" |"))
     return "\n".join(lines)
+
+
+class _EvidenceBuilder:
+    """Shared evidence assembly from the sheet stores."""
+
+    def __init__(
+        self,
+        lead_store: LeadStore,
+        post_store: SheetStore,
+        website_store: SheetStore,
+        *,
+        max_posts: int,
+        max_pages: int,
+        text_chars: int,
+    ) -> None:
+        self._lead_store = lead_store
+        self._post_store = post_store
+        self._website_store = website_store
+        self._max_posts = max_posts
+        self._max_pages = max_pages
+        self._text_chars = text_chars
+
+    def build(self, lead_id: str, lead_values: dict[str, str]) -> Evidence:
+        posts = [
+            row.values
+            for row in self._post_store.read_rows(KEY_POSTS)
+            if row.values.get("leadId") == lead_id
+        ]
+        pages = [
+            row.values
+            for row in self._website_store.read_rows(KEY_WEBSITE_PAGES)
+            if row.values.get("leadId") == lead_id
+        ]
+        return build_evidence(
+            lead_values=lead_values,
+            post_rows=posts,
+            page_rows=pages,
+            max_posts=self._max_posts,
+            max_pages=self._max_pages,
+            text_chars=self._text_chars,
+        )
+
+
+class AIDossierStage:
+    """Generate a validated creator dossier (Phase 6)."""
+
+    name = constants.STAGE_AI_DOSSIER
+
+    def __init__(
+        self,
+        service: AIService,
+        lead_store: LeadStore,
+        post_store: SheetStore,
+        website_store: SheetStore,
+        dossier_store: SheetStore,
+        *,
+        model_name: str = "",
+        job_store: JobStore | None = None,
+        followup_max_attempts: int = 3,
+        max_posts: int = 10,
+        max_pages: int = 5,
+        text_chars: int = 1500,
+    ) -> None:
+        self._service = service
+        self._lead_store = lead_store
+        self._dossier_store = dossier_store
+        self._job_store = job_store
+        self._followup_max_attempts = followup_max_attempts
+        self._model_name = model_name
+        self._evidence = _EvidenceBuilder(
+            lead_store, post_store, website_store,
+            max_posts=max_posts, max_pages=max_pages, text_chars=text_chars,
+        )
+
+    def run(self, job: PipelineJob) -> StageOutcome:
+        lead = self._lead_store.find_row(KEY_IG_LEADS, job.lead_id)
+        if lead is None:
+            return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
+
+        existing = self._dossier_store.find_row(KEY_DOSSIERS, job.lead_id, key_header="leadId")
+        if existing is not None and existing.values.get("status") in (
+            constants.AI_STATUS_NEEDS_REVIEW,
+            "generated",
+        ):
+            return StageOutcome(ok=True, result="dossier already generated")
+
+        evidence = self._evidence.build(job.lead_id, lead.values)
+        if not evidence.has_content():
+            self._store_dossier(
+                job, evidence, None,
+                status=constants.AI_STATUS_INSUFFICIENT,
+                error="insufficient evidence",
+            )
+            return StageOutcome(ok=True, result="insufficient evidence")
+
+        try:
+            result = self._service.generate_dossier(evidence)
+        except AIResponseError as exc:
+            self._store_dossier(job, evidence, None, status=constants.AI_STATUS_ERROR, error=str(exc))
+            return StageOutcome(ok=False, error=_error_text(exc), retryable=False)
+        except (AIRateLimitError, AINetworkError) as exc:
+            return StageOutcome(ok=False, error=_error_text(exc), retryable=True)
+        except (AIConfigError, AIError) as exc:
+            return StageOutcome(ok=False, error=_error_text(exc), retryable=False)
+
+        self._store_dossier(job, evidence, result, status=constants.AI_STATUS_NEEDS_REVIEW, error="")
+        if self._job_store is not None:
+            self._job_store.enqueue(
+                constants.STAGE_AI_OUTREACH,
+                job.lead_id,
+                lead.values.get("username", "") or job.username,
+                lead.values.get("usernameNormalized", "") or job.username_normalized,
+                max_attempts=self._followup_max_attempts,
+            )
+        return StageOutcome(
+            ok=True,
+            result=json.dumps({"score": result.score, "tier": result.tier, "status": constants.AI_STATUS_NEEDS_REVIEW}),
+        )
+
+    def _store_dossier(
+        self,
+        job: PipelineJob,
+        evidence: Evidence,
+        result: DossierResult | None,
+        *,
+        status: str,
+        error: str,
+    ) -> None:
+        existing = self._dossier_store.find_row(KEY_DOSSIERS, job.lead_id, key_header="leadId")
+        created_at = existing.values.get("createdAt", "") if existing else ""
+        now = utc_now_iso()
+        self._dossier_store.upsert_model(
+            KEY_DOSSIERS,
+            Dossier(
+                leadId=job.lead_id,
+                username=evidence.username or job.username,
+                usernameNormalized=job.username_normalized,
+                summary=result.summary if result else "",
+                topics=", ".join(result.topics) if result else "",
+                audience=result.audience if result else "",
+                evidenceUrls="\n".join(result.evidence_urls) if result else "\n".join(evidence.source_urls()),
+                qualificationScore=result.score if result else 0,
+                qualificationTier=result.tier if result else "",
+                rubric=f"{self._service.rubric.name}@{self._service.rubric.version}",
+                criterionScores=json.dumps(result.criterion_scores) if result else "",
+                uncertainty=result.uncertainty if result else "",
+                model=self._model_name,
+                status=status,
+                lastError=error[:500],
+                generatedAt=now if result else "",
+                createdAt=created_at or now,
+                updatedAt=now,
+            ),
+        )
+
+
+class AIOutreachStage:
+    """Generate personalized email/DM drafts marked NEEDS_REVIEW (Phase 6)."""
+
+    name = constants.STAGE_AI_OUTREACH
+
+    def __init__(
+        self,
+        service: AIService,
+        lead_store: LeadStore,
+        post_store: SheetStore,
+        website_store: SheetStore,
+        dossier_store: SheetStore,
+        outreach_store: SheetStore,
+        *,
+        model_name: str = "",
+        max_posts: int = 10,
+        max_pages: int = 5,
+        text_chars: int = 1500,
+    ) -> None:
+        self._service = service
+        self._lead_store = lead_store
+        self._dossier_store = dossier_store
+        self._outreach_store = outreach_store
+        self._model_name = model_name
+        self._evidence = _EvidenceBuilder(
+            lead_store, post_store, website_store,
+            max_posts=max_posts, max_pages=max_pages, text_chars=text_chars,
+        )
+
+    def run(self, job: PipelineJob) -> StageOutcome:
+        lead = self._lead_store.find_row(KEY_IG_LEADS, job.lead_id)
+        if lead is None:
+            return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
+
+        existing = self._outreach_store.find_row(KEY_OUTREACH, job.lead_id, key_header="leadId")
+        if existing is not None and existing.values.get("status") == constants.AI_STATUS_NEEDS_REVIEW:
+            return StageOutcome(ok=True, result="outreach already generated")
+
+        dossier = self._dossier_store.find_row(KEY_DOSSIERS, job.lead_id, key_header="leadId")
+        if dossier is None or dossier.values.get("status") in (
+            constants.AI_STATUS_INSUFFICIENT,
+            constants.AI_STATUS_ERROR,
+        ):
+            return StageOutcome(ok=True, result="no usable dossier; outreach skipped")
+
+        evidence = self._evidence.build(job.lead_id, lead.values)
+        try:
+            draft = self._service.generate_outreach(evidence, dossier.values.get("summary", ""))
+        except AIResponseError as exc:
+            return StageOutcome(ok=False, error=_error_text(exc), retryable=False)
+        except (AIRateLimitError, AINetworkError) as exc:
+            return StageOutcome(ok=False, error=_error_text(exc), retryable=True)
+        except (AIConfigError, AIError) as exc:
+            return StageOutcome(ok=False, error=_error_text(exc), retryable=False)
+
+        created_at = existing.values.get("createdAt", "") if existing else ""
+        now = utc_now_iso()
+        self._outreach_store.upsert_model(
+            KEY_OUTREACH,
+            OutreachEntry(
+                leadId=job.lead_id,
+                username=lead.values.get("username", "") or job.username,
+                usernameNormalized=job.username_normalized,
+                channel="email+dm",
+                status=constants.AI_STATUS_NEEDS_REVIEW,
+                subject=draft.emailSubject.strip(),
+                body=draft.emailBody.strip(),
+                dmBody=draft.dmBody.strip(),
+                model=self._model_name,
+                generatedAt=now,
+                createdAt=created_at or now,
+                updatedAt=now,
+            ),
+        )
+        return StageOutcome(ok=True, result=constants.AI_STATUS_NEEDS_REVIEW)

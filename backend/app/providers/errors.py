@@ -37,3 +37,27 @@ class HikerAPINetworkError(HikerAPIError):
 
 class HikerAPIResponseError(HikerAPIError):
     """The provider returned a non-JSON or unexpected payload."""
+
+
+class AIError(ProviderError):
+    """Base class for AI provider failures."""
+
+
+class AIConfigError(AIError):
+    """Missing or invalid AI configuration (e.g. no API key)."""
+
+
+class AIRateLimitError(AIError):
+    """The AI provider rate-limited the request after retries."""
+
+
+class AIModelError(AIError):
+    """The AI provider rejected the request (bad model/params) or failed."""
+
+
+class AIResponseError(AIError):
+    """The model returned malformed output that failed schema validation."""
+
+
+class AINetworkError(AIError):
+    """Transport failure talking to the AI provider."""

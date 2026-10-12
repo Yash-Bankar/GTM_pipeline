@@ -26,7 +26,17 @@ from .errors import (
     SheetsPermissionError,
     SheetsQuotaError,
 )
-from .models import DedupLead, EnrichedLead, Lead, LeadPost, OutreachEntry, PipelineJob, SheetModel, WebsitePage
+from .models import (
+    DedupLead,
+    Dossier,
+    EnrichedLead,
+    Lead,
+    LeadPost,
+    OutreachEntry,
+    PipelineJob,
+    SheetModel,
+    WebsitePage,
+)
 from .repository import (
     JobStore,
     LeadStore,
@@ -38,9 +48,11 @@ from .repository import (
 )
 from .schemas import (
     DEDUP_HEADERS,
+    DOSSIERS_HEADERS,
     ENRICHED_HEADERS,
     IG_LEADS_HEADERS,
     KEY_DEDUP,
+    KEY_DOSSIERS,
     KEY_ENRICHED,
     KEY_IG_LEADS,
     KEY_JOBS,
@@ -60,7 +72,9 @@ from .util import new_job_id, new_lead_id, stringify, utc_now_iso
 
 __all__ = [
     "DEDUP_HEADERS",
+    "DOSSIERS_HEADERS",
     "DedupLead",
+    "Dossier",
     "DuplicateLeadError",
     "ENRICHED_HEADERS",
     "EnrichedLead",
@@ -68,6 +82,7 @@ __all__ = [
     "IG_LEADS_HEADERS",
     "JobStore",
     "KEY_DEDUP",
+    "KEY_DOSSIERS",
     "KEY_ENRICHED",
     "KEY_IG_LEADS",
     "KEY_JOBS",

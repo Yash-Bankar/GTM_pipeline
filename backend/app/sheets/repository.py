@@ -33,6 +33,7 @@ from .errors import (
 from .models import Lead, PipelineJob, SheetModel
 from .schemas import (
     KEY_DEDUP,
+    KEY_DOSSIERS,
     KEY_ENRICHED,
     KEY_IG_LEADS,
     KEY_JOBS,
@@ -105,6 +106,7 @@ def tab_names_from_settings(settings: Settings) -> dict[str, str]:
         KEY_JOBS: settings.google_sheets_jobs_tab,
         KEY_POSTS: settings.google_sheets_posts_tab,
         KEY_WEBSITE_PAGES: settings.google_sheets_website_pages_tab,
+        KEY_DOSSIERS: settings.google_sheets_dossiers_tab,
     }
 
 

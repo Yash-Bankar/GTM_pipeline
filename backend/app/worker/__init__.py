@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from .main import Worker, main
 from .pipeline import (
+    AIDossierStage,
+    AIOutreachStage,
     ProfileFetchStage,
     ProfileMediaStage,
     Stage,
@@ -20,6 +22,8 @@ from .pipeline import (
 )
 
 __all__ = [
+    "AIDossierStage",
+    "AIOutreachStage",
     "ProfileFetchStage",
     "ProfileMediaStage",
     "Stage",

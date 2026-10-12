@@ -43,7 +43,16 @@ class Settings(BaseSettings):
 
     # AI provider (Google Gemini)
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
+    ai_enabled: bool = True
+    ai_temperature: float = 0.4
+    ai_max_output_tokens: int = 2048
+    ai_timeout_seconds: float = 60.0
+    ai_max_attempts: int = 3
+    ai_rubric_json: str = ""
+    ai_max_posts_evidence: int = 10
+    ai_max_pages_evidence: int = 5
+    ai_evidence_text_chars: int = 1500
 
     # Google Sheets (source of truth)
     google_sheets_spreadsheet_id: str = ""
@@ -54,6 +63,7 @@ class Settings(BaseSettings):
     google_sheets_jobs_tab: str = "Pipeline Jobs"
     google_sheets_posts_tab: str = "Lead Posts"
     google_sheets_website_pages_tab: str = "Website Pages"
+    google_sheets_dossiers_tab: str = "Dossiers"
     google_application_credentials: str = ""
 
     # Google Sheets client behaviour

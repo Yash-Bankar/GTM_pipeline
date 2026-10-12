@@ -44,7 +44,8 @@ synpo-gtm-automation/
 │  ├─ api.md               Lead API reference (Phase 2)
 │  ├─ hikerapi.md          HikerAPI provider reference (Phase 3)
 │  ├─ worker.md            Autonomous worker reference (Phase 4)
-│  └─ website-enrichment.md Website crawl + SSRF rules (Phase 5)
+│  ├─ website-enrichment.md Website crawl + SSRF rules (Phase 5)
+│  └─ gemini.md            Gemini + AI outputs (Phase 6)
 ├─ scripts/           Helper scripts (verify_sheets.py)
 ├─ tests/             Unit tests (mocked Sheets client)
 ├─ pytest.ini         Pytest configuration
@@ -198,6 +199,14 @@ After `profile_fetch`, the worker enqueues two optional stages:
 Both are idempotent and never stall the pipeline when data is unavailable
 (missing website, blocked URLs, partial failures). Follower lists are never
 fetched.
+
+## AI outputs (Phase 6)
+
+Server-side Gemini generation (provider abstraction + `GeminiProvider`), with
+structured dossier + qualification scoring and personalized email/DM drafts.
+Scraped text is treated as untrusted; outputs are stored in `Dossiers` and
+`Outreach` (keyed by `leadId`) and marked `NEEDS_REVIEW` — **nothing is sent**.
+See [docs/gemini.md](docs/gemini.md). Disable with `AI_ENABLED=false`.
 
 ## Documentation
 

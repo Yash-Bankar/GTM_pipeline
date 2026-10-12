@@ -36,6 +36,7 @@ class SheetStores:
     outreach_store: SheetStore
     post_store: SheetStore
     website_store: SheetStore
+    dossier_store: SheetStore
 
 
 def build_sheet_stores(settings: Settings) -> SheetStores:
@@ -53,6 +54,7 @@ def build_sheet_stores(settings: Settings) -> SheetStores:
         outreach_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
         post_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
         website_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
+        dossier_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
     )
 
 

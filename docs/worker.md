@@ -20,12 +20,19 @@ backend/app/worker/
 | `profile_fetch` | HikerAPI profile → enriched row; enqueues the optional follow-ups | `instagram_leads_enriched`, `IG Leads` | `leadId` |
 | `profile_media` | bounded recent posts/reels | `Lead Posts`, lead `mediaStatus` | `postId` |
 | `website_enrich` | SSRF-safe crawl of external links | `Website Pages`, lead `websiteStatus` | `pageId` |
+| `ai_dossier` | Gemini dossier + qualification score | `Dossiers` | `leadId` |
+| `ai_outreach` | Gemini email/DM drafts (`NEEDS_REVIEW`) | `Outreach` | `leadId` |
 
 `profile_fetch` enqueues `profile_media` (when an Instagram id is known) and
 `website_enrich` (when the profile has links). The media/website stages are
 **optional**: when data is genuinely unavailable they mark a status
 (`none`/`blocked`/`error`/`partial`) and still complete the job so the pipeline
 keeps moving. See [website-enrichment.md](website-enrichment.md).
+
+When AI is enabled, `profile_fetch` also enqueues `ai_dossier` (low priority so
+evidence is gathered first), and `ai_dossier` enqueues `ai_outreach`. Both are
+idempotent and store `NEEDS_REVIEW` outputs; nothing is sent. See
+[gemini.md](gemini.md).
 
 ## `Pipeline Jobs` tab
 

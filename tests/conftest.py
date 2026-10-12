@@ -11,9 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.sheets.repository import JobStore, LeadStore  # noqa: E402
 from app.sheets.schemas import (  # noqa: E402
+    DOSSIERS_HEADERS,
     ENRICHED_HEADERS,
     IG_LEADS_HEADERS,
     LEAD_POSTS_HEADERS,
+    OUTREACH_HEADERS,
     PIPELINE_JOBS_HEADERS,
     WEBSITE_PAGES_HEADERS,
 )
@@ -33,7 +35,7 @@ def ig_client() -> FakeSheetsClient:
 
 @pytest.fixture
 def worker_stores():
-    """Stores sharing one fake client, including the enriched/post/website tabs."""
+    """Stores sharing one fake client, including the enriched/post/website/AI tabs."""
     from types import SimpleNamespace
 
     from app.sheets.repository import SheetStore
@@ -45,6 +47,8 @@ def worker_stores():
             "instagram_leads_enriched": [list(ENRICHED_HEADERS)],
             "Lead Posts": [list(LEAD_POSTS_HEADERS)],
             "Website Pages": [list(WEBSITE_PAGES_HEADERS)],
+            "Dossiers": [list(DOSSIERS_HEADERS)],
+            "Outreach": [list(OUTREACH_HEADERS)],
         }
     )
     return SimpleNamespace(
@@ -54,6 +58,8 @@ def worker_stores():
         enriched=SheetStore(client),
         posts=SheetStore(client),
         website=SheetStore(client),
+        dossiers=SheetStore(client),
+        outreach=SheetStore(client),
     )
 
 

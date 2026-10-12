@@ -218,6 +218,10 @@ before its predecessor's exit criteria are met.
   results written to `Outreach`; schema finalized.
 - **Boundary:** generation only, no sending.
 - **Exit criteria:** enriched leads produce outreach drafts in the sheet.
+- **Status:** implemented — AI provider abstraction + `GeminiProvider`
+  (`backend/app/providers/ai.py`), rubric/prompts/service (`backend/app/ai/`),
+  `ai_dossier`/`ai_outreach` stages writing `Dossiers` + `Outreach`
+  (`NEEDS_REVIEW`). See [gemini.md](gemini.md).
 
 ### Phase 7 — Frontend dashboard
 - **Deliverables:** queue/status views, manual stage triggers, lead detail, and

@@ -9,6 +9,8 @@ from __future__ import annotations
 STAGE_PROFILE_FETCH = "profile_fetch"
 STAGE_PROFILE_MEDIA = "profile_media"
 STAGE_WEBSITE_ENRICH = "website_enrich"
+STAGE_AI_DOSSIER = "ai_dossier"
+STAGE_AI_OUTREACH = "ai_outreach"
 
 # Job statuses (`Pipeline Jobs` tab)
 JOB_QUEUED = "queued"
@@ -31,3 +33,8 @@ STAGE_STATUS_PARTIAL = "partial"
 STAGE_STATUS_NONE = "none"          # genuinely no data (no posts / no website)
 STAGE_STATUS_BLOCKED = "blocked"    # URL rejected by SSRF/allow-list rules
 STAGE_STATUS_ERROR = "error"
+
+# AI output statuses (`Dossiers` / `Outreach`)
+AI_STATUS_NEEDS_REVIEW = "NEEDS_REVIEW"
+AI_STATUS_INSUFFICIENT = "insufficient_evidence"
+AI_STATUS_ERROR = "error"

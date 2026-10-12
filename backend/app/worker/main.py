@@ -17,12 +17,22 @@ import logging
 import signal
 import threading
 
+from app.ai import AIService, DEFAULT_RUBRIC, parse_rubric
 from app.config import Settings, get_settings
-from app.constants import STAGE_PROFILE_FETCH, STAGE_PROFILE_MEDIA, STAGE_WEBSITE_ENRICH
+from app.constants import (
+    STAGE_AI_DOSSIER,
+    STAGE_AI_OUTREACH,
+    STAGE_PROFILE_FETCH,
+    STAGE_PROFILE_MEDIA,
+    STAGE_WEBSITE_ENRICH,
+)
 from app.dependencies import SheetStores, build_sheet_stores
 from app.providers import HikerAPIClient
+from app.providers.ai import GeminiProvider
 from app.providers.website import WebsiteCrawler
 from app.worker.pipeline import (
+    AIDossierStage,
+    AIOutreachStage,
     ProfileFetchStage,
     ProfileMediaStage,
     Stage,
@@ -133,13 +143,18 @@ def build_stages(stores: SheetStores, settings: Settings) -> dict[str, Stage]:
         max_attempts=settings.website_max_attempts,
         user_agent=settings.website_user_agent,
     )
-    return {
+    ai_enabled = bool(settings.ai_enabled and settings.gemini_api_key.strip())
+    if settings.ai_enabled and not ai_enabled:
+        logger.warning("AI_ENABLED is true but GEMINI_API_KEY is unset; AI stages disabled.")
+
+    stages: dict[str, Stage] = {
         STAGE_PROFILE_FETCH: ProfileFetchStage(
             hiker,
             stores.lead_store,
             stores.enriched_store,
             job_store=stores.job_store,
             followup_max_attempts=settings.pipeline_max_attempts,
+            enable_ai=ai_enabled,
         ),
         STAGE_PROFILE_MEDIA: ProfileMediaStage(
             hiker,
@@ -155,6 +170,37 @@ def build_stages(stores: SheetStores, settings: Settings) -> dict[str, Stage]:
             enriched_store=stores.enriched_store,
         ),
     }
+
+    if ai_enabled:
+        rubric = parse_rubric(settings.ai_rubric_json) or DEFAULT_RUBRIC
+        service = AIService(GeminiProvider.from_settings(settings), rubric)
+        evidence_kwargs = {
+            "max_posts": settings.ai_max_posts_evidence,
+            "max_pages": settings.ai_max_pages_evidence,
+            "text_chars": settings.ai_evidence_text_chars,
+        }
+        stages[STAGE_AI_DOSSIER] = AIDossierStage(
+            service,
+            stores.lead_store,
+            stores.post_store,
+            stores.website_store,
+            stores.dossier_store,
+            model_name=settings.gemini_model,
+            job_store=stores.job_store,
+            followup_max_attempts=settings.pipeline_max_attempts,
+            **evidence_kwargs,
+        )
+        stages[STAGE_AI_OUTREACH] = AIOutreachStage(
+            service,
+            stores.lead_store,
+            stores.post_store,
+            stores.website_store,
+            stores.dossier_store,
+            stores.outreach_store,
+            model_name=settings.gemini_model,
+            **evidence_kwargs,
+        )
+    return stages
 
 
 def parse_args() -> argparse.Namespace:

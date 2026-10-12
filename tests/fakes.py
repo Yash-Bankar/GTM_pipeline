@@ -123,6 +123,30 @@ class FakeCrawler:
         return list(self._pages), list(self._emails)
 
 
+class FakeAIProvider:
+    """Stand-in for an AIProvider; returns configured schema instances or raises."""
+
+    def __init__(self, *, dossier=None, outreach=None, error: BaseException | None = None) -> None:
+        self._dossier = dossier
+        self._outreach = outreach
+        self._error = error
+        self.calls = 0
+        self.prompts: list[str] = []
+        self.systems: list[str] = []
+
+    def generate_structured(self, *, prompt: str, system: str, schema):
+        self.calls += 1
+        self.prompts.append(prompt)
+        self.systems.append(system)
+        if self._error is not None:
+            raise self._error
+        if schema.__name__ == "DossierDraft":
+            return self._dossier if self._dossier is not None else schema()
+        if schema.__name__ == "OutreachDraft":
+            return self._outreach if self._outreach is not None else schema()
+        return schema()
+
+
 class RecordingStage:
     """A trivial stage that records jobs and returns a configured outcome."""
 

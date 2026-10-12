@@ -124,11 +124,35 @@ class OutreachEntry(SheetModel):
     status: str = Field(default="draft", alias="status")
     subject: str = Field(default="", alias="subject")
     body: str = Field(default="", alias="body")
+    dm_body: str = Field(default="", alias="dmBody")
     model: str = Field(default="", alias="model")
     generated_at: str = Field(default="", alias="generatedAt")
     created_at: str = Field(default="", alias="createdAt")
     updated_at: str = Field(default="", alias="updatedAt")
     last_error: str = Field(default="", alias="lastError")
+
+
+class Dossier(SheetModel):
+    """Row in the `Dossiers` tab (one AI dossier per lead)."""
+
+    lead_id: str = Field(default="", alias="leadId")
+    username: str = Field(default="", alias="username")
+    username_normalized: str = Field(default="", alias="usernameNormalized")
+    summary: str = Field(default="", alias="summary")
+    topics: str = Field(default="", alias="topics")
+    audience: str = Field(default="", alias="audience")
+    evidence_urls: str = Field(default="", alias="evidenceUrls")
+    qualification_score: IntField = Field(default=0, alias="qualificationScore")
+    qualification_tier: str = Field(default="", alias="qualificationTier")
+    rubric: str = Field(default="", alias="rubric")
+    criterion_scores: str = Field(default="", alias="criterionScores")
+    uncertainty: str = Field(default="", alias="uncertainty")
+    model: str = Field(default="", alias="model")
+    status: str = Field(default="", alias="status")
+    last_error: str = Field(default="", alias="lastError")
+    generated_at: str = Field(default="", alias="generatedAt")
+    created_at: str = Field(default="", alias="createdAt")
+    updated_at: str = Field(default="", alias="updatedAt")
 
 
 class PipelineJob(SheetModel):
