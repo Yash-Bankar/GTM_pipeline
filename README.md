@@ -47,9 +47,14 @@ synpo-gtm-automation/
 │  ├─ worker.md            Autonomous worker reference (Phase 4)
 │  ├─ website-enrichment.md Website crawl + SSRF rules (Phase 5)
 │  ├─ gemini.md            Gemini + AI outputs (Phase 6)
-│  └─ dashboard.md         Next.js dashboard + access control (Phase 7)
-├─ scripts/           Helper scripts (verify_sheets.py)
+│  ├─ dashboard.md         Next.js dashboard + access control (Phase 7)
+│  ├─ deployment.md        Containers, production, Kubernetes (Phase 10)
+│  └─ runbook.md           End-to-end test runbook
+├─ scripts/           Helper scripts (verify_sheets.py, check_*.py)
 ├─ tests/             Unit tests (mocked Sheets client)
+├─ Dockerfile         Backend + worker image (non-root, no secrets)
+├─ docker-compose.yml Local orchestration (api + worker [+ dashboard profile])
+├─ .dockerignore
 ├─ pytest.ini         Pytest configuration
 ├─ .env.example       Environment variable template (safe placeholders)
 ├─ CLAUDE.md          Agent/contributor guidance for this repo
@@ -234,6 +239,19 @@ no Sheets access, no provider secrets. Load `extension/` unpacked from
 ```powershell
 node --test extension/lib.test.js
 ```
+
+## Deployment
+
+Containerize and run everything with Docker Compose, or deploy the pieces to
+production (including Kubernetes). See [docs/deployment.md](docs/deployment.md).
+
+```powershell
+Copy-Item .env.example .env          # + backend/secrets/service-account.json
+docker compose up --build            # API + worker
+docker compose --profile frontend up # + dashboard (http://localhost:3000)
+```
+
+For a full end-to-end verification, follow [docs/runbook.md](docs/runbook.md).
 
 ## Documentation
 

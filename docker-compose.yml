@@ -1,0 +1,81 @@
+# Synpo GTM Automation - local/production orchestration.
+#
+#   docker compose up --build            # API + worker
+#   docker compose --profile frontend up # also run the Next.js dashboard
+#
+# Secrets come from the repo-root `.env` (never baked into the image) and the
+# service-account JSON is mounted read-only from ./backend/secrets.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: synpo-gtm-backend:local
+    env_file:
+      - .env
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/service-account.json
+    volumes:
+      - ./backend/secrets:/app/secrets:ro
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: synpo-gtm-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - .env
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/service-account.json
+    volumes:
+      - ./backend/secrets:/app/secrets:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # IMPORTANT: run exactly ONE worker instance (single-writer, spreadsheet-backed).
+
+  frontend:
+    profiles: ["frontend"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: synpo-gtm-frontend:local
+    env_file:
+      - path: ./frontend/.env.local
+        required: false
+    environment:
+      # In-container API URL (service name on the compose network).
+      API_BASE_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy

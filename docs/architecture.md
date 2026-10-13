@@ -246,8 +246,17 @@ before its predecessor's exit criteria are met.
   observability, run configuration; a Sheets-based work lease to allow more than
   one writer.
 - **Exit criteria:** unattended daily operation is reliable.
+- **Note:** a planned data-migration phase was intentionally skipped — there is
+  no database to migrate.
 
-### Phase 10 — Hermes Agent integration
+### Phase 10 — Operations, testing & deployment
+- **Deliverables:** backend/worker container images + Compose, a deployment guide
+  (local, production, Kubernetes, Next.js), accurate `.env.example` files, and an
+  end-to-end runbook.
+- **Status:** implemented — `Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile`,
+  [deployment.md](deployment.md), [runbook.md](runbook.md).
+
+### Phase 11 — Hermes Agent integration
 - **Deliverables:** agent integration over enriched/outreach data.
 - **Exit criteria:** defined once Hermes's interface is known.
 

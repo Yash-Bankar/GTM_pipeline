@@ -187,6 +187,19 @@ versions.
 - Shared pure logic lives in `extension/lib.js` (UMD) so it is unit-testable
   under Node; keep browser-only chrome APIs out of it.
 
+## Deployment rules (Phase 10)
+
+- Containers: `Dockerfile` (backend + worker, non-root, no secrets) and
+  `docker-compose.yml`; guide in [deployment.md](docs/deployment.md).
+- Never bake secrets into images; inject env and mount the service-account JSON
+  read-only. Keep `.dockerignore`/`.gitignore` covering secrets.
+- **One worker replica only** (single writer). Scale dashboard/API reads, not
+  writers, until a Sheets-based lease exists.
+- Keep `backend/.env.example` and `frontend/.env.example` in sync with
+  `Settings` and `process.env.*` usage — no undocumented variables.
+- Frontend vars live in `frontend/.env.local` (Next does **not** read the
+  repo-root `.env`). Never use `NEXT_PUBLIC_` for secrets.
+
 ## Commands
 
 ```powershell
@@ -215,7 +228,11 @@ cd backend; .\.venv\Scripts\python.exe -m app.worker --drain; cd ..
 cd frontend; npm run lint; npx tsc --noEmit; npm run build
 
 # Extension helpers
-node --test extension/lib.test.js```
+node --test extension/lib.test.js
+
+# Containers (local)
+docker compose up --build
+docker compose logs -f api worker```
 
 ## Definition of done (per change)
 
