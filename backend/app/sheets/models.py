@@ -67,6 +67,8 @@ class Lead(SheetModel):
     created_at: str = Field(default="", alias="createdAt")
     updated_at: str = Field(default="", alias="updatedAt")
     last_error: str = Field(default="", alias="lastError")
+    media_status: str = Field(default="", alias="mediaStatus")
+    website_status: str = Field(default="", alias="websiteStatus")
 
 
 class DedupLead(SheetModel):

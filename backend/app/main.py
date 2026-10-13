@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app import __version__
+from app.dashboard.routes import router as dashboard_router
 from app.leads.routes import router as leads_router
 from app.leads.validation import InvalidLeadInput
 from app.sheets.errors import (
@@ -27,6 +28,7 @@ app = FastAPI(
 )
 
 app.include_router(leads_router)
+app.include_router(dashboard_router)
 
 
 def _problem(status_code: int, message: str) -> JSONResponse:

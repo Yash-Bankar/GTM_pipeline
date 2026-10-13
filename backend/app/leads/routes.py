@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.dependencies import get_lead_service
+from app.dependencies import get_lead_service, require_api_key
 from app.leads.schemas import (
     LeadCreateRequest,
     LeadListResponse,
@@ -13,7 +13,11 @@ from app.leads.schemas import (
 )
 from app.leads.service import LeadService
 
-router = APIRouter(prefix="/api/v1", tags=["leads"])
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["leads"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.post(

@@ -228,6 +228,9 @@ before its predecessor's exit criteria are met.
   generated-outreach review; consumes the FastAPI API.
 - **Boundary:** UI only; no direct Sheets access.
 - **Exit criteria:** operators can drive the pipeline from the browser.
+- **Status:** implemented in `frontend/` (App Router + Server Actions + a
+  password access gate) with supporting read endpoints in `backend/app/dashboard/`.
+  See [dashboard.md](dashboard.md).
 
 ### Phase 8 — Orchestration & scheduling hardening
 - **Deliverables:** worker scheduling, retries/backoff, stale-job recovery,

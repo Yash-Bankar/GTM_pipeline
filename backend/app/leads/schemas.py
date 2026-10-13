@@ -64,6 +64,8 @@ class LeadResponse(BaseModel):
     created_at: str
     updated_at: str
     last_error: str
+    media_status: str
+    website_status: str
 
     @classmethod
     def from_lead(cls, lead: Lead) -> "LeadResponse":
@@ -89,6 +91,8 @@ class LeadResponse(BaseModel):
             created_at=lead.created_at,
             updated_at=lead.updated_at,
             last_error=lead.last_error,
+            media_status=lead.media_status,
+            website_status=lead.website_status,
         )
 
 

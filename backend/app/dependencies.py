@@ -12,7 +12,10 @@ import threading
 from dataclasses import dataclass
 from functools import lru_cache
 
+from fastapi import Header, HTTPException, status
+
 from app.config import Settings, get_settings
+from app.dashboard.service import DashboardService
 from app.leads.service import LeadService
 from app.sheets.client import GoogleSheetsClient
 from app.sheets.repository import (
@@ -76,11 +79,36 @@ def get_lead_service() -> LeadService:
     return LeadService(stores.lead_store, job_store=stores.job_store)
 
 
+def get_dashboard_service() -> DashboardService:
+    stores = get_sheet_stores()
+    return DashboardService(
+        lead_store=stores.lead_store,
+        job_store=stores.job_store,
+        enriched_store=stores.enriched_store,
+        post_store=stores.post_store,
+        website_store=stores.website_store,
+        dossier_store=stores.dossier_store,
+        outreach_store=stores.outreach_store,
+    )
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Reject requests missing a valid `x-api-key` when API_KEY is configured."""
+    expected = get_settings().api_key.strip()
+    if expected and x_api_key != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key.",
+        )
+
+
 __all__ = [
     "SheetStores",
     "build_sheet_stores",
+    "get_dashboard_service",
     "get_job_store",
     "get_lead_service",
     "get_lead_store",
     "get_sheet_stores",
+    "require_api_key",
 ]

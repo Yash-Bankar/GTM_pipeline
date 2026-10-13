@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # Backend API
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+    # When set, API requests must send a matching `x-api-key` header.
+    api_key: str = ""
 
     # Instagram data provider (HikerAPI)
     hikerapi_base_url: str = "https://api.hikerapi.com/v2"

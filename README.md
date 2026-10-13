@@ -45,7 +45,8 @@ synpo-gtm-automation/
 │  ├─ hikerapi.md          HikerAPI provider reference (Phase 3)
 │  ├─ worker.md            Autonomous worker reference (Phase 4)
 │  ├─ website-enrichment.md Website crawl + SSRF rules (Phase 5)
-│  └─ gemini.md            Gemini + AI outputs (Phase 6)
+│  ├─ gemini.md            Gemini + AI outputs (Phase 6)
+│  └─ dashboard.md         Next.js dashboard + access control (Phase 7)
 ├─ scripts/           Helper scripts (verify_sheets.py)
 ├─ tests/             Unit tests (mocked Sheets client)
 ├─ pytest.ini         Pytest configuration
@@ -207,6 +208,20 @@ structured dossier + qualification scoring and personalized email/DM drafts.
 Scraped text is treated as untrusted; outputs are stored in `Dossiers` and
 `Outreach` (keyed by `leadId`) and marked `NEEDS_REVIEW` — **nothing is sent**.
 See [docs/gemini.md](docs/gemini.md). Disable with `AI_ENABLED=false`.
+
+## Dashboard (Phase 7)
+
+Internal Next.js App Router dashboard (React 19 + TypeScript + Tailwind v4) over
+the Python API: searchable leads table, add-lead form, lead detail (profile,
+posts, website pages, job history), dossier view, and outreach review with
+approve/reject. Server-only API access, a password access gate, and loading /
+empty / duplicate / error+retry states. See [docs/dashboard.md](docs/dashboard.md).
+
+```powershell
+cd frontend
+Copy-Item .env.example .env.local   # set API_BASE_URL, BACKEND_API_KEY, DASHBOARD_PASSWORD
+npm run dev                          # http://localhost:3000
+```
 
 ## Documentation
 

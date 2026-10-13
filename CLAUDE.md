@@ -156,6 +156,24 @@ versions.
 - Qualification scoring is deterministic from the rubric — compute it in code,
   not in the prompt.
 
+## Dashboard rules (Phase 7)
+
+- Dashboard lives in `frontend/` (App Router, React 19, TS, Tailwind v4);
+  reference in [dashboard.md](docs/dashboard.md).
+- **Read the bundled Next 16 docs first** (`frontend/node_modules/next/dist/docs`)
+  — `params`/`searchParams` are Promises, `middleware.ts` is now `proxy.ts`,
+  `cacheComponents` requires a Suspense boundary around runtime data, and
+  `revalidateTag` needs a profile.
+- The browser must **never** call the Python API or providers directly: use the
+  server-only client `frontend/src/lib/api.ts` (`API_BASE_URL`,
+  `BACKEND_API_KEY`). Never expose secrets with `NEXT_PUBLIC_`.
+- Gate every page/action with `requireSession()`; keep `proxy.ts` as an
+  optimistic first line only.
+- Mutations use Server Actions (`src/actions/*.ts`, `"use server"`) + revalidation.
+- Provide loading/empty/error states; `loading.tsx` is also required by Cache
+  Components for Suspense.
+- No direct Instagram scraping and no sending of messages.
+
 ## Commands
 
 ```powershell
@@ -181,8 +199,7 @@ cd backend; .\.venv\Scripts\python.exe -m app.worker --drain; cd ..
 .\backend\.venv\Scripts\python.exe scripts\check_gemini.py
 
 # Frontend
-cd frontend; npm run lint; npx tsc --noEmit; npm run build
-```
+cd frontend; npm run lint; npx tsc --noEmit; npm run build```
 
 ## Definition of done (per change)
 
