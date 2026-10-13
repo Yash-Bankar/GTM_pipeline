@@ -31,7 +31,14 @@ from .errors import (
     SheetsPermissionError,
     SheetsQuotaError,
 )
-from .retry import TRANSPORT_ERRORS, call_with_retry, http_status, is_retryable
+from .retry import (
+    TRANSPORT_ERRORS,
+    call_with_retry,
+    http_status,
+    is_quota_error,
+    is_retryable,
+    make_delay_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +113,8 @@ class GoogleSheetsClient(SheetsClient):
         max_attempts: int = 5,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
+        quota_backoff_base: float = 10.0,
+        quota_backoff_max: float = 60.0,
         sleeper: Callable[[float], None] | None = None,
         retryable: Callable[[BaseException], bool] = is_retryable,
     ) -> None:
@@ -116,7 +125,13 @@ class GoogleSheetsClient(SheetsClient):
         self._max_attempts = max(1, int(max_attempts))
         self._backoff_base = backoff_base
         self._backoff_max = backoff_max
+        self._quota_backoff_base = quota_backoff_base
+        self._quota_backoff_max = quota_backoff_max
         self._retryable = retryable
+        # 429 quota errors use a much longer, dedicated backoff (10s -> 60s).
+        self._delay_for = make_delay_for(
+            quota_base=quota_backoff_base, quota_maximum=quota_backoff_max
+        )
 
         import time as _time
 
@@ -133,6 +148,8 @@ class GoogleSheetsClient(SheetsClient):
             max_attempts=settings.google_sheets_max_attempts,
             backoff_base=settings.google_sheets_backoff_base_seconds,
             backoff_max=settings.google_sheets_backoff_max_seconds,
+            quota_backoff_base=settings.google_sheets_quota_backoff_base_seconds,
+            quota_backoff_max=settings.google_sheets_quota_backoff_max_seconds,
         )
 
     # -- low-level execution ------------------------------------------------
@@ -144,12 +161,13 @@ class GoogleSheetsClient(SheetsClient):
             return build_request().execute()
 
         def _on_retry(attempt: int, delay: float, exc: BaseException) -> None:
+            kind = "quota/rate-limit" if is_quota_error(exc) else type(exc).__name__
             logger.warning(
-                "Google Sheets call failed (attempt %s/%s), retrying in %.2fs: %s",
+                "Google Sheets call failed (attempt %s/%s, %s), retrying in %.2fs",
                 attempt,
                 self._max_attempts,
+                kind,
                 delay,
-                type(exc).__name__,
             )
 
         try:
@@ -161,6 +179,7 @@ class GoogleSheetsClient(SheetsClient):
                 sleeper=self._sleeper,
                 retryable=self._retryable,
                 on_retry=_on_retry,
+                delay_for=self._delay_for,
             )
         except HttpError as exc:
             raise _map_http_error(exc) from exc

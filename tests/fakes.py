@@ -172,6 +172,9 @@ class FakeSheetsClient(SheetsClient):
             self.tabs[name] = [list(row) for row in rows]
         self.append_calls = 0
         self.update_calls = 0
+        self.titles_calls = 0
+        self.read_tab_calls = 0
+        self.read_row_calls = 0
         self.created_tabs: list[str] = []
 
     def _require(self, tab: str) -> None:
@@ -179,9 +182,11 @@ class FakeSheetsClient(SheetsClient):
             raise SheetsApiError(f"tab not found: {tab}")
 
     def list_tab_titles(self) -> list[str]:
+        self.titles_calls += 1
         return list(self.tabs.keys())
 
     def read_tab(self, tab: str) -> list[list[str]]:
+        self.read_tab_calls += 1
         self._require(tab)
         return [list(row) for row in self.tabs[tab]]
 
@@ -189,6 +194,7 @@ class FakeSheetsClient(SheetsClient):
         return {tab: self.read_tab(tab) for tab in tabs}
 
     def read_row(self, tab: str, row_number: int) -> list[str]:
+        self.read_row_calls += 1
         self._require(tab)
         rows = self.tabs[tab]
         if 1 <= row_number <= len(rows):

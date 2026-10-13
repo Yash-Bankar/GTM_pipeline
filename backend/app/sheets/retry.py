@@ -74,6 +74,45 @@ def is_retryable(exc: BaseException) -> bool:
     return isinstance(exc, TRANSPORT_ERRORS)
 
 
+def is_quota_error(exc: BaseException) -> bool:
+    """Return True for HTTP 429 (or 403 quota) rate-limit errors.
+
+    These need a much longer backoff than ordinary 5xx errors so the client does
+    not immediately burn the 60 requests/minute Sheets quota again.
+    """
+    if not isinstance(exc, HttpError):
+        return False
+    status = http_status(exc)
+    if status == 429:
+        return True
+    return status == 403 and _looks_like_quota(str(exc))
+
+
+def quota_backoff(attempt: int, *, base: float = 10.0, maximum: float = 60.0) -> float:
+    """Dedicated exponential backoff for quota errors: base, 2x, 4x... capped.
+
+    With the defaults this yields 10s, 20s, 40s, 60s, 60s, ...
+    """
+    return min(maximum, base * (2 ** (max(1, attempt) - 1)))
+
+
+def make_delay_for(
+    *, quota_base: float = 10.0, quota_maximum: float = 60.0
+) -> Callable[[BaseException, int], float | None]:
+    """Build a ``delay_for`` hook that applies the long quota backoff for 429s.
+
+    Returns ``None`` for non-quota errors so ``call_with_retry`` falls back to its
+    normal (jittered) curve.
+    """
+
+    def delay_for(exc: BaseException, attempt: int) -> float | None:
+        if is_quota_error(exc):
+            return quota_backoff(attempt, base=quota_base, maximum=quota_maximum)
+        return None
+
+    return delay_for
+
+
 def call_with_retry(
     func: Callable[[], T],
     *,

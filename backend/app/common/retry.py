@@ -23,6 +23,7 @@ def call_with_retry(
     rand: Callable[[], float] = random.random,
     retryable: Callable[[BaseException], bool] | None = None,
     on_retry: Callable[[int, float, BaseException], None] | None = None,
+    delay_for: Callable[[BaseException, int], float | None] | None = None,
 ) -> T:
     """Call ``func`` with exponential backoff on transient failures.
 
@@ -34,6 +35,10 @@ def call_with_retry(
     :param retryable: predicate deciding whether an exception is transient;
         defaults to "never retry".
     :param on_retry: optional callback ``(attempt, delay, exc)`` before sleeping.
+    :param delay_for: optional ``(exc, attempt) -> seconds | None`` override.
+        When it returns a number that exact delay is used (no jitter), which lets
+        callers apply a dedicated, longer backoff for specific errors (e.g. HTTP
+        429 quota) while everything else uses the default curve.
     """
     if retryable is None:
         def retryable(_exc: BaseException) -> bool:
@@ -48,8 +53,12 @@ def call_with_retry(
         except Exception as exc:  # noqa: BLE001 - re-raised below
             if attempt >= attempts or not retryable(exc):
                 raise
-            ceiling = min(backoff_max, backoff_base * (2 ** (attempt - 1)))
-            delay = ceiling * rand()
+            override = delay_for(exc, attempt) if delay_for is not None else None
+            if override is not None:
+                delay = max(0.0, float(override))
+            else:
+                ceiling = min(backoff_max, backoff_base * (2 ** (attempt - 1)))
+                delay = ceiling * rand()
             if on_retry is not None:
                 on_retry(attempt, delay, exc)
             sleeper(delay)

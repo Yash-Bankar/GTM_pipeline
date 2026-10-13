@@ -83,3 +83,14 @@ def test_restart_recovery_requeues_and_processes(job_store) -> None:
     assert processed == 2  # recovered stale job + the queued one
     assert len(stage.ran) == 2
     assert all(row.values["status"] == JOB_DONE for row in job_store.read_rows(KEY_JOBS))
+
+def test_poll_interval_has_minimum_floor(job_store) -> None:
+    stage = RecordingStage("profile_fetch")
+    worker = Worker(job_store=job_store, stages={stage.name: stage}, poll_interval=0.0)
+    assert worker._poll_interval >= 5.0
+
+
+def test_poll_interval_default_is_at_least_floor(job_store) -> None:
+    stage = RecordingStage("profile_fetch")
+    worker = Worker(job_store=job_store, stages={stage.name: stage})
+    assert worker._poll_interval >= 5.0

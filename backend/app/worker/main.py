@@ -42,6 +42,10 @@ from app.worker.pipeline import (
 
 logger = logging.getLogger("synpo.worker")
 
+# Never poll faster than this, even if configured lower, so an idle worker does
+# not burn the Google Sheets quota (~60 requests/min) just by polling.
+MIN_POLL_INTERVAL_SECONDS = 5.0
+
 
 class Worker:
     """Single-threaded job runner."""
@@ -60,7 +64,7 @@ class Worker:
         self._job_store = job_store
         self._stages = dict(stages)
         self._worker_id = worker_id
-        self._poll_interval = max(0.0, float(poll_interval))
+        self._poll_interval = max(MIN_POLL_INTERVAL_SECONDS, float(poll_interval))
         self._stale_minutes = stale_minutes
         self._retry_backoff_base = retry_backoff_base
         self._retry_backoff_max = retry_backoff_max
@@ -234,7 +238,7 @@ def main() -> int:
         job_store=stores.job_store,
         stages=build_stages(stores, settings),
         worker_id=args.worker_id,
-        poll_interval=args.poll_interval if args.poll_interval is not None else settings.worker_poll_seconds,
+        poll_interval=args.poll_interval if args.poll_interval is not None else settings.worker_poll_interval,
         stale_minutes=args.stale_minutes if args.stale_minutes is not None else settings.worker_stale_minutes,
         retry_backoff_base=settings.pipeline_retry_backoff_base_seconds,
         retry_backoff_max=settings.pipeline_retry_backoff_max_seconds,

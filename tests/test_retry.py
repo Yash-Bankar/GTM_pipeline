@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.sheets.retry import call_with_retry, http_status, is_retryable
+from app.sheets.retry import (
+    call_with_retry,
+    http_status,
+    is_quota_error,
+    is_retryable,
+    make_delay_for,
+    quota_backoff,
+)
 from fakes import make_http_error
 
 
@@ -97,3 +104,60 @@ def test_is_retryable_transport_errors() -> None:
 def test_http_status_extraction() -> None:
     assert http_status(make_http_error(429)) == 429
     assert http_status(ValueError()) == 0
+
+def test_quota_backoff_curve() -> None:
+    assert quota_backoff(1) == 10.0
+    assert quota_backoff(2) == 20.0
+    assert quota_backoff(3) == 40.0
+    assert quota_backoff(4) == 60.0
+    assert quota_backoff(5) == 60.0
+
+
+def test_is_quota_error() -> None:
+    assert is_quota_error(make_http_error(429)) is True
+    assert is_quota_error(make_http_error(403, "Quota exceeded")) is True
+    assert is_quota_error(make_http_error(500)) is False
+    assert is_quota_error(ValueError()) is False
+
+
+def test_call_with_retry_uses_long_quota_backoff() -> None:
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    def fn() -> str:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise make_http_error(429)
+        return "ok"
+
+    result = call_with_retry(
+        fn,
+        max_attempts=4,
+        sleeper=sleeps.append,
+        rand=lambda: 0.0,
+        delay_for=make_delay_for(quota_base=10.0, quota_maximum=60.0),
+    )
+    assert result == "ok"
+    assert sleeps == [10.0, 20.0]  # deterministic long backoff, no jitter
+
+
+def test_call_with_retry_falls_back_when_delay_for_returns_none() -> None:
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    def fn() -> str:
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise TimeoutError()
+        return "ok"
+
+    call_with_retry(
+        fn,
+        max_attempts=3,
+        backoff_base=1.0,
+        backoff_max=10.0,
+        sleeper=sleeps.append,
+        rand=lambda: 1.0,
+        delay_for=make_delay_for(),
+    )
+    assert sleeps == [1.0]  # non-quota error uses the default curve

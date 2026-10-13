@@ -73,6 +73,11 @@ versions.
   header-named updates.
 - One backend instance / one worker only: mutations are serialized in-process.
   Do not add a concurrent job claimer until a Sheets-based lease exists.
+- **Rate limits:** 429 quota errors use a dedicated long backoff
+  (`GOOGLE_SHEETS_QUOTA_BACKOFF_BASE_SECONDS` → `..._MAX_SECONDS`, 10s→60s), and
+  tab titles / header layouts are cached in memory
+  (`GOOGLE_SHEETS_LAYOUT_CACHE_TTL_SECONDS`) so the worker does not re-read
+  headers on every operation. Invalidate the cache after any header write.
 - Do not call HikerAPI, Gemini, or scrape websites from the storage layer.
 
 ## Lead API rules (Phase 2)
@@ -120,6 +125,8 @@ versions.
 - Reuse `app.common.retry.call_with_retry`; store error details in `lastError`.
 - Support graceful shutdown (stop event) and restart recovery
   (`recover_stale_jobs`).
+- The idle poll interval (`WORKER_POLL_INTERVAL`) is floored at **5s** in code;
+  do not let the worker spin on an empty queue (Sheets quota).
 
 ## Enrichment stage rules (Phase 5)
 

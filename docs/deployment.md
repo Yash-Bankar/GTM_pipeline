@@ -269,6 +269,7 @@ Notes:
 | API 503 "storage is not configured" | missing `GOOGLE_SHEETS_SPREADSHEET_ID` / credentials |
 | API 401 | `API_KEY` set but caller didn't send `x-api-key` |
 | Sheets 403 | spreadsheet not shared with the service-account email |
+| Repeated Sheets 429 | back off: keep `GOOGLE_SHEETS_LAYOUT_CACHE_TTL_SECONDS` > 0, raise `WORKER_POLL_INTERVAL`, increase `GOOGLE_SHEETS_QUOTA_BACKOFF_*` |
 | Worker does nothing | no eligible jobs, or `HIKERAPI_KEY` unset, or wrong `Pipeline Jobs` tab name |
 | Dossiers/outreach never appear | `AI_ENABLED=false` or `GEMINI_API_KEY` unset |
 | Gemini 404 | retired model — pick a current one (see `docs/gemini.md`) |

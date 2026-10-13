@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -120,18 +121,29 @@ class SheetStore:
         tab_names: dict[str, str] | None = None,
         schemas: dict[str, SheetSchema] | None = None,
         mutation_lock: threading.RLock | None = None,
+        layout_cache_ttl: float = 300.0,
     ) -> None:
         self._client = client
         self._tab_names = dict(tab_names or {})
         self._schemas = dict(schemas or SCHEMAS)
         self._lock = mutation_lock or threading.RLock()
+        # In-memory cache so the worker does not re-read tab titles / header rows
+        # on every single operation (a major source of quota usage).
+        self._layout_cache_ttl = max(0.0, float(layout_cache_ttl))
+        self._cache_lock = threading.Lock()
+        self._tab_titles_cache: tuple[float, list[str]] | None = None
+        self._layout_cache: dict[str, tuple[float, TabLayout]] = {}
 
     # -- construction -------------------------------------------------------
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "SheetStore":
         client = GoogleSheetsClient.from_settings(settings)
-        return cls(client, tab_names=tab_names_from_settings(settings))
+        return cls(
+            client,
+            tab_names=tab_names_from_settings(settings),
+            layout_cache_ttl=settings.google_sheets_layout_cache_ttl_seconds,
+        )
 
     # -- schema / layout ----------------------------------------------------
 
@@ -141,11 +153,41 @@ class SheetStore:
     def tab_name(self, key: str) -> str:
         return self._tab_names.get(key) or self.schema(key).default_tab
 
+    def invalidate_layout(self, key: str | None = None) -> None:
+        """Drop cached layout(s) so the next read re-fetches headers."""
+        with self._cache_lock:
+            if key is None:
+                self._layout_cache.clear()
+            else:
+                self._layout_cache.pop(key, None)
+
+    def invalidate_tab_titles(self) -> None:
+        with self._cache_lock:
+            self._tab_titles_cache = None
+
+    def invalidate_all(self) -> None:
+        with self._cache_lock:
+            self._tab_titles_cache = None
+            self._layout_cache.clear()
+
     def get_layout(self, key: str) -> TabLayout:
-        """Load a tab's live layout, raising if the tab or header row is absent."""
+        """Return a tab's live layout, cached for ``layout_cache_ttl`` seconds."""
+        now = time.monotonic()
+        with self._cache_lock:
+            cached = self._layout_cache.get(key)
+            if cached is not None and now - cached[0] < self._layout_cache_ttl:
+                return cached[1]
+
+        layout = self._load_layout(key)
+        with self._cache_lock:
+            self._layout_cache[key] = (time.monotonic(), layout)
+        return layout
+
+    def _load_layout(self, key: str) -> TabLayout:
+        """Fetch a tab's layout from the API (uncached)."""
         schema = self.schema(key)
         tab = self.tab_name(key)
-        titles = self._client.list_tab_titles()
+        titles = self.list_tab_titles()
         if tab not in titles:
             raise SheetTabMissingError(
                 f"Tab '{tab}' not found in the spreadsheet (available: {titles})."
@@ -156,7 +198,17 @@ class SheetStore:
         return TabLayout(schema=schema, tab=tab, headers=[h.strip() for h in headers])
 
     def list_tab_titles(self) -> list[str]:
-        return self._client.list_tab_titles()
+        """Return tab titles, cached for ``layout_cache_ttl`` seconds."""
+        now = time.monotonic()
+        with self._cache_lock:
+            cached = self._tab_titles_cache
+            if cached is not None and now - cached[0] < self._layout_cache_ttl:
+                return list(cached[1])
+
+        titles = self._client.list_tab_titles()
+        with self._cache_lock:
+            self._tab_titles_cache = (time.monotonic(), list(titles))
+        return titles
 
     def ensure_schema(
         self,
@@ -175,7 +227,7 @@ class SheetStore:
         with self._lock:
             schema = self.schema(key)
             tab = self.tab_name(key)
-            titles = self._client.list_tab_titles()
+            titles = self.list_tab_titles()
 
             if tab not in titles:
                 if not create_missing:
@@ -188,6 +240,7 @@ class SheetStore:
                     )
                 self._client.create_tab(tab)
                 self._client.append_rows(tab, [list(schema.headers)])
+                self.invalidate_all()
                 logger.info("Created tab '%s' with %s headers", tab, len(schema.headers))
                 return SchemaReport(
                     key=key, tab=tab, ok=True, created=True, header_written=True
@@ -196,6 +249,7 @@ class SheetStore:
             headers = [h.strip() for h in self._client.read_row(tab, 1)]
             if not any(headers):
                 self._client.append_rows(tab, [list(schema.headers)])
+                self.invalidate_layout(key)
                 return SchemaReport(
                     key=key, tab=tab, ok=True, header_written=True, created=False
                 )
@@ -246,6 +300,7 @@ class SheetStore:
 
         if updates:
             self._client.update_cells(tab, updates)
+            self.invalidate_layout()
             logger.info("Extended tab '%s' headers: %s", tab, extended)
         return extended
 
@@ -517,7 +572,11 @@ class LeadStore(SheetStore):
     @classmethod
     def from_settings(cls, settings: Settings) -> "LeadStore":
         client = GoogleSheetsClient.from_settings(settings)
-        return cls(client, tab_names=tab_names_from_settings(settings))
+        return cls(
+            client,
+            tab_names=tab_names_from_settings(settings),
+            layout_cache_ttl=settings.google_sheets_layout_cache_ttl_seconds,
+        )
 
 
 def _iso_after(seconds: float) -> str:
@@ -735,4 +794,9 @@ class JobStore(SheetStore):
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobStore":
         client = GoogleSheetsClient.from_settings(settings)
-        return cls(client, tab_names=tab_names_from_settings(settings))
+        return cls(
+            client,
+            tab_names=tab_names_from_settings(settings),
+            layout_cache_ttl=settings.google_sheets_layout_cache_ttl_seconds,
+        )
+

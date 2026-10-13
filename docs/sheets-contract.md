@@ -144,9 +144,16 @@ Crawled website pages (Phase 5). `pageId` is a deterministic hash of
 
 - Batch reads (`batchGet`) and batch writes (`batchUpdate`) where possible.
 - Per-request timeout via `GOOGLE_SHEETS_REQUEST_TIMEOUT_SECONDS`.
-- Exponential backoff with full jitter on transient errors (429/5xx and
-  transport timeouts): `GOOGLE_SHEETS_MAX_ATTEMPTS`,
-  `GOOGLE_SHEETS_BACKOFF_BASE_SECONDS`, `GOOGLE_SHEETS_BACKOFF_MAX_SECONDS`.
+- Exponential backoff with full jitter on transient errors (5xx and transport
+  timeouts): `GOOGLE_SHEETS_MAX_ATTEMPTS`, `GOOGLE_SHEETS_BACKOFF_BASE_SECONDS`,
+  `GOOGLE_SHEETS_BACKOFF_MAX_SECONDS`.
+- **429 quota/rate-limit** errors use a separate, much longer backoff
+  (`GOOGLE_SHEETS_QUOTA_BACKOFF_BASE_SECONDS` → `..._MAX_SECONDS`, default
+  **10s → 60s**) so retries don't immediately re-burn the 60 req/min quota.
+- **In-memory layout cache**: tab titles and header rows are cached per store for
+  `GOOGLE_SHEETS_LAYOUT_CACHE_TTL_SECONDS` (default 300s; `0` disables), so reads
+  and writes don't re-fetch headers every operation. Header writes (schema
+  creation/extension) invalidate the cache automatically.
 - Typed errors: `SheetsAuthError`, `SheetsPermissionError`, `SheetsQuotaError`,
   `SheetsNetworkError`, `SheetsNotFoundError`, `SheetTabMissingError`,
   `SchemaError`, `DuplicateLeadError`, `SheetsApiError`.

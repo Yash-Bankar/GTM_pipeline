@@ -111,3 +111,40 @@ def test_client_raises_mapped_error_without_retry() -> None:
 def test_client_requires_spreadsheet_id() -> None:
     with pytest.raises(Exception):
         GoogleSheetsClient(_FakeService(_ValuesResource([])), "  ")
+
+def test_client_uses_long_quota_backoff_for_429() -> None:
+    sleeps: list[float] = []
+    service = _FakeService(
+        _ValuesResource([make_http_error(429), make_http_error(429), {"values": [["header"]]}])
+    )
+    client = GoogleSheetsClient(
+        service,
+        "spreadsheet-id",
+        max_attempts=3,
+        backoff_base=0.0,
+        quota_backoff_base=10.0,
+        quota_backoff_max=60.0,
+        sleeper=sleeps.append,
+    )
+    assert client.read_tab("IG Leads") == [["header"]]
+    assert sleeps == [10.0, 20.0]
+
+
+def test_client_quota_backoff_is_capped() -> None:
+    sleeps: list[float] = []
+    service = _FakeService(
+        _ValuesResource(
+            [make_http_error(429), make_http_error(429), make_http_error(429), make_http_error(429), {"values": [["h"]]}]
+        )
+    )
+    client = GoogleSheetsClient(
+        service,
+        "spreadsheet-id",
+        max_attempts=5,
+        backoff_base=0.0,
+        quota_backoff_base=10.0,
+        quota_backoff_max=60.0,
+        sleeper=sleeps.append,
+    )
+    assert client.read_tab("IG Leads") == [["h"]]
+    assert sleeps == [10.0, 20.0, 40.0, 60.0]

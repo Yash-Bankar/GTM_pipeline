@@ -75,9 +75,14 @@ class Settings(BaseSettings):
     google_sheets_max_attempts: int = 5
     google_sheets_backoff_base_seconds: float = 0.5
     google_sheets_backoff_max_seconds: float = 30.0
+    # Longer, dedicated backoff for 429 quota/rate-limit errors (10s -> 60s).
+    google_sheets_quota_backoff_base_seconds: float = 10.0
+    google_sheets_quota_backoff_max_seconds: float = 60.0
+    # How long to cache tab titles / header layouts in memory (seconds).
+    google_sheets_layout_cache_ttl_seconds: float = 300.0
 
     # Worker
-    worker_poll_seconds: int = 30
+    worker_poll_interval: int = 30
     worker_stale_minutes: int = 30
 
     # Profile media (recent posts/reels)

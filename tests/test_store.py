@@ -154,3 +154,29 @@ def test_update_preserves_unknown_columns() -> None:
     row = client.read_row("IG Leads", 2)
     assert row[idx["customField"]] == "keep-me"  # untouched by the targeted update
     assert row[idx["status"]] == "done"
+
+def test_get_layout_and_tab_titles_are_cached(ig_client) -> None:
+    store = SheetStore(ig_client, tab_names={"ig_leads": "IG Leads"})
+    store.get_layout("ig_leads")
+    store.get_layout("ig_leads")
+    store.read_rows("ig_leads")
+    assert ig_client.titles_calls == 1  # titles fetched once, then cached
+    assert ig_client.read_row_calls == 1  # header row read once, then cached
+
+
+def test_layout_cache_can_be_disabled(ig_client) -> None:
+    store = SheetStore(ig_client, tab_names={"ig_leads": "IG Leads"}, layout_cache_ttl=0.0)
+    store.get_layout("ig_leads")
+    store.get_layout("ig_leads")
+    assert ig_client.titles_calls == 2
+    assert ig_client.read_row_calls == 2
+
+
+def test_ensure_schema_invalidates_layout_cache() -> None:
+    from fakes import FakeSheetsClient
+
+    client = FakeSheetsClient({"IG Leads": [["leadId", "username"]]})
+    store = SheetStore(client, tab_names={"ig_leads": "IG Leads"})
+    store.get_layout("ig_leads")  # caches the 2-column layout
+    store.ensure_schema("ig_leads", create_missing=False, extend_headers=True)
+    assert "status" in store.get_layout("ig_leads").headers
