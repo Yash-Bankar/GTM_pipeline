@@ -174,6 +174,19 @@ versions.
   Components for Suspense.
 - No direct Instagram scraping and no sending of messages.
 
+## Extension rules (Phase 8)
+
+- Extension lives in `extension/` (MV3); reference in
+  [extension/README.md](extension/README.md).
+- Capture **only** the profile handle/URL — no bio/follower/media scraping.
+- The extension talks **only** to the backend API (`POST /api/v1/leads`); never
+  to Google Sheets or providers. No provider secrets in the extension.
+- The API key is user-supplied and stored in `chrome.storage.local`; send it as
+  `x-api-key`. Surface clear created/duplicate/invalid/auth/network states.
+- Ignore repeated clicks while a request is in flight (disable the button).
+- Shared pure logic lives in `extension/lib.js` (UMD) so it is unit-testable
+  under Node; keep browser-only chrome APIs out of it.
+
 ## Commands
 
 ```powershell
@@ -199,7 +212,10 @@ cd backend; .\.venv\Scripts\python.exe -m app.worker --drain; cd ..
 .\backend\.venv\Scripts\python.exe scripts\check_gemini.py
 
 # Frontend
-cd frontend; npm run lint; npx tsc --noEmit; npm run build```
+cd frontend; npm run lint; npx tsc --noEmit; npm run build
+
+# Extension helpers
+node --test extension/lib.test.js```
 
 ## Definition of done (per change)
 

@@ -232,13 +232,22 @@ before its predecessor's exit criteria are met.
   password access gate) with supporting read endpoints in `backend/app/dashboard/`.
   See [dashboard.md](dashboard.md).
 
-### Phase 8 — Orchestration & scheduling hardening
+### Phase 8 — Extension integration
+- **Deliverables:** minimal MV3 extension that captures the current Instagram
+  profile and submits it to the authenticated API (`POST /api/v1/leads`), with
+  clear created/duplicate/error/auth states; no scraping, no Sheets access.
+- **Boundary:** capture only; no provider secrets.
+- **Exit criteria:** adding a creator from Instagram queues a deduplicated lead.
+- **Status:** implemented in `extension/`. See
+  [../extension/README.md](../extension/README.md).
+
+### Phase 9 — Orchestration & scheduling hardening
 - **Deliverables:** worker scheduling, retries/backoff, stale-job recovery,
   observability, run configuration; a Sheets-based work lease to allow more than
   one writer.
 - **Exit criteria:** unattended daily operation is reliable.
 
-### Phase 9 — Hermes Agent integration
+### Phase 10 — Hermes Agent integration
 - **Deliverables:** agent integration over enriched/outreach data.
 - **Exit criteria:** defined once Hermes's interface is known.
 

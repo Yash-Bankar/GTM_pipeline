@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Synpo GTM Lead Capture</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header>
+        <p class="label">Synpo GTM</p>
+        <h1>Lead Capture</h1>
+      </header>
+
+      <section class="profile">
+        <span class="muted">Current profile</span>
+        <strong id="handle">—</strong>
+      </section>
+
+      <button id="addButton" type="button">Add to pipeline</button>
+      <p id="status" class="status">Open an Instagram profile page.</p>
+
+      <details>
+        <summary>Settings</summary>
+        <label for="apiBaseUrl">API base URL</label>
+        <input id="apiBaseUrl" type="text" spellcheck="false" placeholder="http://127.0.0.1:8000" />
+        <label for="apiKey">API key <span class="muted">(x-api-key, optional)</span></label>
+        <input id="apiKey" type="password" spellcheck="false" placeholder="optional" />
+        <button id="saveSettings" type="button" class="secondary">Save settings</button>
+        <p class="muted">Stored locally in this browser. The API key is never sent anywhere except your backend.</p>
+      </details>
+    </main>
+    <script src="lib.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

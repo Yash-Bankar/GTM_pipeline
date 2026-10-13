@@ -1,0 +1,143 @@
+:root {
+  color-scheme: dark;
+  --ink: #0a101c;
+  --surface: #0e1626;
+  --line: #1b2942;
+  --text: #eef3fb;
+  --muted: #7c8cae;
+  --accent: #22c98a;
+  --accent-ink: #04120b;
+  --warn: #f5b544;
+  --error: #f2637f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--ink);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.panel {
+  padding: 16px;
+  background: var(--surface);
+}
+
+header {
+  margin-bottom: 14px;
+}
+
+.label {
+  margin: 0 0 2px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.profile {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b1220;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#handle {
+  overflow-wrap: anywhere;
+  font-size: 17px;
+}
+
+button {
+  width: 100%;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #4ade9f;
+}
+
+button:disabled {
+  background: #27385a;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.secondary {
+  background: #27385a;
+  color: var(--text);
+}
+
+.status {
+  min-height: 20px;
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status.ok {
+  color: var(--accent);
+}
+
+.status.warn {
+  color: var(--warn);
+}
+
+.status.error {
+  color: var(--error);
+}
+
+details {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+label {
+  display: block;
+  margin: 10px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: #0b1220;
+  color: var(--text);
+  font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+}

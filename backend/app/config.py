@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     api_port: int = 8000
     # When set, API requests must send a matching `x-api-key` header.
     api_key: str = ""
+    # Comma-separated CORS origins for browser clients (e.g. the extension).
+    cors_allow_origins: str = "*"
 
     # Instagram data provider (HikerAPI)
     hikerapi_base_url: str = "https://api.hikerapi.com/v2"

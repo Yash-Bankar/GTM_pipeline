@@ -28,6 +28,7 @@ stage in Google Sheets.
 ```text
 synpo-gtm-automation/
 ├─ frontend/          Next.js app (App Router, TS, Tailwind)
+├─ extension/         Chrome MV3 lead-capture extension (Phase 8)
 ├─ backend/           FastAPI app + background worker (Python)
 │  ├─ app/
 │  │  ├─ config.py    Settings loaded from environment
@@ -221,6 +222,17 @@ empty / duplicate / error+retry states. See [docs/dashboard.md](docs/dashboard.m
 cd frontend
 Copy-Item .env.example .env.local   # set API_BASE_URL, BACKEND_API_KEY, DASHBOARD_PASSWORD
 npm run dev                          # http://localhost:3000
+```
+
+## Chrome extension (Phase 8)
+
+Minimal MV3 extension that sends the current Instagram profile to the API
+(`POST /api/v1/leads`) with clear created/duplicate/error states — no scraping,
+no Sheets access, no provider secrets. Load `extension/` unpacked from
+`chrome://extensions`. See [extension/README.md](extension/README.md).
+
+```powershell
+node --test extension/lib.test.js
 ```
 
 ## Documentation

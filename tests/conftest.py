@@ -22,6 +22,20 @@ from app.sheets.schemas import (  # noqa: E402
 from fakes import FakeSheetsClient  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_api_key(monkeypatch):
+    """Keep tests independent of a developer's local .env API_KEY.
+
+    Tests that exercise auth set API_KEY themselves (and clear the cache).
+    """
+    from app.config import get_settings
+
+    monkeypatch.setenv("API_KEY", "")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture
 def ig_client() -> FakeSheetsClient:
     """A fake client with the canonical `IG Leads` and `Pipeline Jobs` headers."""

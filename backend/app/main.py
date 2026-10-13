@@ -8,9 +8,11 @@ it directly.
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
+from app.config import get_settings
 from app.dashboard.routes import router as dashboard_router
 from app.leads.routes import router as leads_router
 from app.leads.validation import InvalidLeadInput
@@ -25,6 +27,15 @@ app = FastAPI(
     title="Synpo GTM Automation API",
     version=__version__,
     summary="Operations API for the Synpo GTM Instagram creator pipeline.",
+)
+
+_cors_origins = [o.strip() for o in get_settings().cors_allow_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins or ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
 )
 
 app.include_router(leads_router)
