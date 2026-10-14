@@ -1,272 +1,258 @@
 # Synpo GTM Automation
 
-Automation for a GTM (go-to-market) pipeline built around Instagram creator
-discovery: collect creator handles, deduplicate them, enrich them with public
-Instagram + website data, generate personalized outreach with AI, and track every
-stage in PostgreSQL.
+A modern, containerized go-to-market (GTM) pipeline for Instagram creator
+discovery. Capture creator handles, enrich them with public Instagram + website
+data, generate AI dossiers and personalized outreach, and manage everything from
+a Next.js console — with **PostgreSQL as the single source of truth**.
 
-> Status: **feature-complete MVP.** Lead capture, autonomous worker, Instagram +
-> website enrichment, Gemini dossiers/outreach, the Next.js dashboard, and the
-> Chrome extension are implemented. See
-> [docs/architecture.md](docs/architecture.md) for architecture and phases.
+> **Status: production-ready MVP.** Lead capture, the autonomous worker,
+> Instagram + website enrichment, Gemini dossiers/outreach, the Next.js console,
+> the Chrome extension, and the full container deployment are implemented.
+> The storage layer was migrated from Google Sheets to PostgreSQL (SQLAlchemy +
+> Alembic).
 
-## Target stack
+---
 
-| Layer | Technology |
-| --- | --- |
-| Frontend | Next.js (App Router) + React + TypeScript + Tailwind CSS |
-| Backend API | Python + FastAPI |
-| Background worker | Python (long-running process) |
-| Operational data | **PostgreSQL** (source of truth; SQLAlchemy + Alembic) |
-| Instagram data | HikerAPI |
-| AI generation | Google Gemini (initially) |
-| Agent orchestration | Hermes Agent (later) |
-| Persistence | PostgreSQL only — no Google Sheets |
+## 1. Overview & Architecture
 
-## Repository layout
+Synpo GTM is a small, opinionated stack:
+
+- **FastAPI backend** (`:8000`) — the only component that touches the database;
+  validates/normalizes leads, exposes read + action endpoints, and enqueues work.
+- **Python autonomous worker** — polls the job table, runs pipeline stages, and
+  persists progress. Idempotent, retry-aware, restart-safe. **One instance.**
+- **PostgreSQL 15** — durable state for leads, posts, website pages, dossiers,
+  outreach drafts, and the job queue. Schema is managed by **Alembic**.
+- **Next.js GTM Console** (`:3000`) — leads table, lead detail, dossiers, and
+  outreach review (approve/reject), with an Aurora background and glass panels.
+- **Google Gemini** — structured dossiers + qualification scoring and email/DM
+  outreach drafts (review-only; nothing is sent).
+- **Chrome extension (MV3)** — one-click lead capture from the current Instagram
+  profile.
+
+### Data flow
+
+```text
+        ┌───────────────────────────────┐
+        │        Chrome Extension        │
+        │   (MV3 · current IG profile)   │
+        └───────────────┬───────────────┘
+                        │  POST /api/v1/leads  (x-api-key)
+                        ▼
+   ┌───────────────────────────────────────────────────────────────┐
+   │                     FastAPI backend  :8000                    │
+   │   /health · /api/v1/leads · /api/v1/dossiers · /api/v1/outreach│
+   └───────────────┬───────────────────────────────┬───────────────┘
+                   │ SQLAlchemy (sync)              │ server-side reads
+                   ▼                                │
+   ┌──────────────────────────────┐                 │
+   │        PostgreSQL 15         │◀────────────────┘
+   │  leads · lead_posts ·        │
+   │  website_pages · dossiers ·  │
+   │  outreach_drafts ·           │
+   │  pipeline_jobs               │
+   │  (Alembic migrations)        │
+   └───────────────▲──────────────┘
+                   │  claim job · persist progress
+   ┌───────────────┴───────────────────────────────────────────────┐
+   │             Python autonomous worker (1 instance)             │
+   │                                                               │
+   │  profile_fetch  → HikerAPI  (profile → lead fields)           │
+   │  profile_media  → HikerAPI  (recent posts/reels → lead_posts) │
+   │  website_enrich → SSRF-safe crawler (evidence → website_pages)│
+   │  ai_dossier     → Gemini    (structured dossier + scoring)    │
+   │  ai_outreach    → Gemini    (email + DM drafts, NEEDS_REVIEW) │
+   └───────────────┬───────────────────────────────────────────────┘
+                   │  reads via the API (server-side only)
+   ┌───────────────▼───────────────┐
+   │   Next.js GTM Console  :3000  │
+   │   leads · dossiers · outreach │
+   └───────────────────────────────┘
+```
+
+**Key principles**
+
+- The browser/extension **never** touch PostgreSQL or provider APIs directly.
+- **PostgreSQL is the only datastore** (no Google Sheets, no second DB).
+- Provider secrets stay **server-side**; the dashboard is protected by a
+  password gate.
+- AI output is always `NEEDS_REVIEW`; **no messages are ever sent**.
+
+---
+
+## 2. Features
+
+- **Single-click lead ingestion** — the Chrome extension sends the current
+  Instagram profile to the API (`POST /api/v1/leads`) with clear
+  created / duplicate / invalid / auth / network states.
+- **Automated enrichment** — creator profile fields (followers, bio, category,
+  public contact), recent posts/reels, and SSRF-safe website crawling with
+  email extraction.
+- **AI dossiers & outreach** — structured dossiers with a configurable
+  qualification rubric and personalized email + DM drafts via the Google Gemini
+  API (`gemini-3.5-flash-lite` for cost/throughput or `gemini-3.8-flash` for
+  quality).
+- **Next.js GTM Console** — searchable/filterable leads table, lead detail with
+  posts + website evidence + job history, dossier view, outreach approval, and
+  **manual AI re-processing** ("Re-process AI Jobs Only").
+- **Durable, idempotent pipeline** — a database-backed job queue with bounded
+  retries, exponential backoff, and stale-job recovery after restarts.
+- **Visual status** — animated circular loaders for `running`/`queued`/`retry`
+  jobs and a check for completed ones.
+
+---
+
+## 3. Repository layout
 
 ```text
 synpo-gtm-automation/
-├─ frontend/          Next.js app (App Router, TS, Tailwind)
-├─ extension/         Chrome MV3 lead-capture extension (Phase 8)
-├─ backend/           FastAPI app + background worker (Python)
+├─ frontend/           Next.js console (App Router, React 19, TS, Tailwind v4)
+├─ extension/          Chrome MV3 lead-capture extension
+├─ backend/            FastAPI app + background worker (Python 3.14)
 │  ├─ app/
-│  │  ├─ config.py    Settings loaded from environment
-│  │  ├─ main.py      FastAPI app (health + lead API)
-│  │  ├─ worker/      Autonomous worker: poll/claim/run stages (Phase 4)
-│  │  ├─ common/      Shared helpers (retry)
-│  │  ├─ leads/       Lead API: validation, service, routes (Phase 2)
-│  │  ├─ providers/   HikerAPI client + normalization (Phase 3)
-│  │  └─ db/          PostgreSQL storage: models + repository (Phase 11)
-│  ├─ alembic/        Database migrations
+│  │  ├─ config.py     Settings from environment
+│  │  ├─ main.py       FastAPI app (health + leads + dashboard API)
+│  │  ├─ worker/       Autonomous worker (poll/claim/run stages)
+│  │  ├─ providers/    HikerAPI client, Gemini provider, website crawler
+│  │  ├─ ai/           Rubric, prompts, evidence, AI service
+│  │  ├─ leads/        Lead validation/service/routes
+│  │  ├─ dashboard/    Dashboard read/action endpoints
+│  │  └─ db/           PostgreSQL models + repository
+│  ├─ alembic/         Database migrations
 │  └─ requirements.txt
-├─ docs/
-│  ├─ architecture.md      Proposed architecture, data flow, phase boundaries
-│  ├─ database.md          PostgreSQL schema and contracts (Phase 11)
-│  ├─ api.md               Lead API reference (Phase 2)
-│  ├─ hikerapi.md          HikerAPI provider reference (Phase 3)
-│  ├─ worker.md            Autonomous worker reference (Phase 4)
-│  ├─ website-enrichment.md Website crawl + SSRF rules (Phase 5)
-│  ├─ gemini.md            Gemini + AI outputs (Phase 6)
-│  ├─ dashboard.md         Next.js dashboard + access control (Phase 7)
-│  ├─ deployment.md        Containers, production, Kubernetes (Phase 10)
-│  └─ runbook.md           End-to-end test runbook
-├─ scripts/           Helper scripts (verify_db.py, check_*.py)
-├─ tests/             Unit tests (in-memory SQLite)
-├─ Dockerfile         Backend + worker image (non-root, no secrets)
-├─ docker-compose.yml Local orchestration (api + worker [+ dashboard profile])
-├─ .dockerignore
-├─ pytest.ini         Pytest configuration
-├─ .env.example       Environment variable template (safe placeholders)
-├─ CLAUDE.md          Agent/contributor guidance for this repo
+├─ docs/               Detailed references (see index below)
+├─ scripts/            verify_db.py, check_hikerapi.py, check_gemini.py
+├─ tests/              Unit tests (in-memory SQLite)
+├─ Dockerfile          Backend + worker image (non-root, no secrets)
+├─ docker-compose.yml  db + api + worker (+ optional frontend profile)
+├─ DEPLOYMENT_ORACLE.md  OCI (Oracle Cloud) deployment guide
+├─ .env.example        Backend/worker environment template
 └─ README.md
 ```
 
-## Getting started (Windows PowerShell)
+---
 
-### 1. Environment variables
+## 4. Local Development Quickstart
 
-```powershell
-Copy-Item .env.example .env
-# then edit .env and fill in your real values (never commit .env)
+### Prerequisites
+
+| Tool | Why |
+| --- | --- |
+| **Docker Desktop** | Runs Postgres, the API, the worker, and the dashboard |
+| **WSL2** (Windows) | Docker Desktop's Linux backend on Windows |
+| **Git** | Clone the repository |
+| Chrome / Edge | Load the unpacked extension |
+
+You do **not** need Python or Node installed to run via Docker.
+
+### Configure `.env`
+
+```bash
+cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
 ```
 
-### 2. Backend (FastAPI)
+Fill in the values below. Never commit `.env` (it is gitignored).
 
-A virtual environment is already present at `backend\.venv`. If you need to
-recreate it:
+| Variable | Required | Description |
+| --- | --- | --- |
+| `DATABASE_URL` | ✅ | Sync SQLAlchemy URL. In Compose use `postgresql+psycopg2://postgres:postgres@db:5432/synpo`; for local (non-Docker) use `@localhost`. |
+| `GEMINI_API_KEY` | ✅ for AI | Google Gemini API key (dossiers + outreach). Leave blank and set `AI_ENABLED=false` to skip AI. |
+| `GEMINI_MODEL` | ✅ for AI | `gemini-3.5-flash-lite` (cheaper/faster) or `gemini-3.8-flash` (higher quality). |
+| `HIKERAPI_KEY` | ✅ | HikerAPI key for Instagram profile/media enrichment. |
+| `API_KEY` | ✅ | Shared secret. When set, the API requires the `x-api-key` header. |
+| `CORS_ALLOW_ORIGINS` | optional | Comma-separated origins (default `*`; restrict in production). |
+| `AI_ENABLED` | optional | `true`/`false` — disables all AI stages. |
+| `WORKER_POLL_INTERVAL` | optional | Idle poll seconds (min 5). |
 
-```powershell
-py -3.14 -m venv backend\.venv
-.\backend\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+> **Dashboard auth:** the Next.js console talks to the API server-side using
+> `frontend/.env.local` → `BACKEND_API_KEY` (must equal `API_KEY`) and
+> `DASHBOARD_PASSWORD` (login gate). Create it so the console can authenticate:
+
+```bash
+cp frontend/.env.example frontend/.env.local
+# set BACKEND_API_KEY=<same as API_KEY> and DASHBOARD_PASSWORD=<your password>
 ```
 
-Run the API (from the `backend` directory so the `app` package resolves):
+### Spin up the whole stack (single command)
 
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-cd ..
+```bash
+docker compose --profile frontend up --build
 ```
 
-Smoke test:
+- Dashboard: <http://localhost:3000>
+- API + docs: <http://localhost:8000> (`/health`, `/docs`)
+- PostgreSQL: `localhost:5432`
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
+The API container **runs migrations on start** (`alembic upgrade head`) before
+serving, so the schema is created automatically.
+
+### Database migrations (Alembic)
+
+Migrations run automatically when the API starts. To run them manually:
+
+```bash
+docker compose exec api alembic upgrade head
 ```
 
-### 3. Worker (background process)
+Create a new migration after changing models:
 
-Run from the `backend` directory so the `app` package resolves:
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m app.worker --once   # single cycle
-.\.venv\Scripts\python.exe -m app.worker           # loop (later phases)
-cd ..
+```bash
+docker compose exec api alembic revision --autogenerate -m "describe change"
 ```
 
-### 4. Frontend (Next.js)
+Verify the schema:
 
-```powershell
-cd frontend
-npm install          # dependencies are already installed
-npm run dev          # http://localhost:3000
+```bash
+docker compose exec db psql -U postgres -d synpo -c "\dt"
 ```
 
-Quality checks:
+(`scripts/verify_db.py` can also be run from the host with
+`DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/synpo`.)
 
-```powershell
-cd frontend
-npm run lint
-npx tsc --noEmit
-npm run build
+### Load the Chrome extension
+
+1. Open `chrome://extensions/` and enable **Developer mode**.
+2. Click **Load unpacked** and select the **`extension/`** folder.
+3. Open the extension popup → **Settings** → set:
+   - **API base URL**: `http://127.0.0.1:8000` (local) or your production HTTPS API.
+   - **API key**: the same value as `API_KEY`.
+4. Open an Instagram profile and click **Add to GTM**.
+
+### Useful commands
+
+```bash
+docker compose ps                      # service status
+docker compose logs -f api worker      # follow logs
+docker compose restart worker          # restart one service
+docker compose down                    # stop (keeps the postgres volume)
+docker compose down -v                 # stop and DELETE data
 ```
 
-## Storage (PostgreSQL)
+---
 
-PostgreSQL is the single source of truth. The storage layer is
-`backend/app/db/` (SQLAlchemy models + repository); the schema is managed by
-Alembic. See [docs/database.md](docs/database.md).
+## 5. Documentation index
 
-```powershell
-# start Postgres (or use docker compose)
-docker run --name synpo-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=synpo -p 5432:5432 -d postgres:15-alpine
+- [docs/architecture.md](docs/architecture.md) — components, data flow, phases
+- [docs/database.md](docs/database.md) — PostgreSQL schema and contracts
+- [docs/api.md](docs/api.md) — lead API reference
+- [docs/hikerapi.md](docs/hikerapi.md) — HikerAPI provider
+- [docs/worker.md](docs/worker.md) — autonomous worker + job queue
+- [docs/website-enrichment.md](docs/website-enrichment.md) — crawling + SSRF rules
+- [docs/gemini.md](docs/gemini.md) — Gemini provider, rubric, prompts
+- [docs/dashboard.md](docs/dashboard.md) — Next.js console + access control
+- [docs/deployment.md](docs/deployment.md) — containers, production, Kubernetes
+- [docs/runbook.md](docs/runbook.md) — end-to-end verification runbook
+- [DEPLOYMENT_ORACLE.md](DEPLOYMENT_ORACLE.md) — Oracle Cloud (OCI) deployment
+- [extension/README.md](extension/README.md) — Chrome extension
 
-# apply migrations + verify
-cd backend; .\.venv\Scripts\python.exe -m alembic upgrade head; cd ..
-.\backend\.venv\Scripts\python.exe scripts\verify_db.py
-```
+---
 
-Run the unit tests (in-memory SQLite, no external services):
+## 6. Ground rules
 
-```powershell
-.\backend\.venv\Scripts\python.exe -m pytest
-```
-
-## Lead API (Phase 2)
-
-Submit and retrieve leads over HTTP; the browser never accesses the database
-directly. See [docs/api.md](docs/api.md) for the full reference.
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-cd ..
-
-# submit a lead (201 new, 200 if it already exists)
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/leads -ContentType application/json -Body '{"username":"@some.creator"}'
-
-# list with pagination/search
-Invoke-RestMethod "http://127.0.0.1:8000/api/v1/leads?limit=20&q=crypto&status=queued"
-```
-
-Endpoints: `POST /api/v1/leads`, `GET /api/v1/leads`, `GET /api/v1/leads/{leadId}`,
-plus `GET /health`. New leads are stored with `status="queued"` for the worker.
-
-## HikerAPI provider (Phase 3)
-
-Typed client for fetching a public Instagram profile (profile fetch +
-normalization only). See [docs/hikerapi.md](docs/hikerapi.md).
-
-```powershell
-.\backend\.venv\Scripts\python.exe scripts\check_hikerapi.py --username natgeo
-```
-
-## Autonomous worker (Phase 4)
-
-Polls the `Pipeline Jobs` tab, claims one job, runs its stage, and persists
-progress (idempotent, retry-aware, restart-safe). See [docs/worker.md](docs/worker.md).
-
-Run the API and worker in **separate terminals**:
-
-```powershell
-# Terminal A - API
-cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-
-# Terminal B - worker (from backend)
-cd backend
-.\.venv\Scripts\python.exe -m app.worker          # long-running poller
-.\.venv\Scripts\python.exe -m app.worker --drain  # run queued jobs then exit
-.\.venv\Scripts\python.exe -m app.worker --once   # process one job
-```
-
-One worker and one API instance only (spreadsheet-backed MVP).
-
-## Profile media + website enrichment (Phase 5)
-
-After `profile_fetch`, the worker enqueues two optional stages:
-
-- `profile_media` — bounded recent posts/reels → `Lead Posts` (keyed by `postId`).
-- `website_enrich` — SSRF-safe crawl of the profile's links → `Website Pages`
-  (keyed by `pageId`), with strict URL validation, size/timeout limits and
-  bounded retries. See [docs/website-enrichment.md](docs/website-enrichment.md).
-
-Both are idempotent and never stall the pipeline when data is unavailable
-(missing website, blocked URLs, partial failures). Follower lists are never
-fetched.
-
-## AI outputs (Phase 6)
-
-Server-side Gemini generation (provider abstraction + `GeminiProvider`), with
-structured dossier + qualification scoring and personalized email/DM drafts.
-Scraped text is treated as untrusted; outputs are stored in `Dossiers` and
-`Outreach` (keyed by `leadId`) and marked `NEEDS_REVIEW` — **nothing is sent**.
-See [docs/gemini.md](docs/gemini.md). Disable with `AI_ENABLED=false`.
-
-## Dashboard (Phase 7)
-
-Internal Next.js App Router dashboard (React 19 + TypeScript + Tailwind v4) over
-the Python API: searchable leads table, add-lead form, lead detail (profile,
-posts, website pages, job history), dossier view, and outreach review with
-approve/reject. Server-only API access, a password access gate, and loading /
-empty / duplicate / error+retry states. See [docs/dashboard.md](docs/dashboard.md).
-
-```powershell
-cd frontend
-Copy-Item .env.example .env.local   # set API_BASE_URL, BACKEND_API_KEY, DASHBOARD_PASSWORD
-npm run dev                          # http://localhost:3000
-```
-
-## Chrome extension (Phase 8)
-
-Minimal MV3 extension that sends the current Instagram profile to the API
-(`POST /api/v1/leads`) with clear created/duplicate/error states — no scraping,
-no Sheets access, no provider secrets. Load `extension/` unpacked from
-`chrome://extensions`. See [extension/README.md](extension/README.md).
-
-```powershell
-node --test extension/lib.test.js
-```
-
-## Deployment
-
-Containerize and run everything with Docker Compose, or deploy the pieces to
-production (including Kubernetes). See [docs/deployment.md](docs/deployment.md).
-
-```powershell
-Copy-Item .env.example .env          # set DATABASE_URL, HIKERAPI_KEY, GEMINI_API_KEY, API_KEY
-docker compose up --build            # postgres + API + worker
-docker compose --profile frontend up # + dashboard (http://localhost:3000)
-```
-
-For a full end-to-end verification, follow [docs/runbook.md](docs/runbook.md).
-
-## Documentation
-
-- [docs/architecture.md](docs/architecture.md) — components, data flow,
-  PostgreSQL data contract, and the phased implementation plan.
-- [CLAUDE.md](CLAUDE.md) — conventions and guardrails for contributors and
-  coding agents.
-
-## Ground rules
-
-- **PostgreSQL is the single source of truth** for operational data.
-- **No Google Sheets / no second datastore.** All state lives in Postgres.
-- **No secrets in code or git.** Use `.env` (gitignored) with `.env.example` as
+- **PostgreSQL is the single source of truth.** No Google Sheets, no second DB.
+- **No secrets in code or git.** Use `.env` (gitignored); keep `.env.example` as
   the template.
-- **Do not copy the legacy repository's architecture.** The old
-  `insta_enrichment` project is read-only reference material; only selectively
-  refactor small, well-tested pieces (e.g. HikerAPI calls, website enrichment)
-  when a phase explicitly calls for it.
+- **One worker instance** until a database-based lease is added.
+- **No sending** — outreach drafts are review-only.
+- The legacy `insta_enrichment` repository is read-only reference material; only
+  small, well-tested pieces are refactored into this project.
