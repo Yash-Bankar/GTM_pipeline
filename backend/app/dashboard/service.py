@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from app import constants
@@ -60,6 +61,39 @@ class DashboardService:
             on_duplicate="reenqueue",
         )
         return job
+
+    def retry_ai(self, lead_id: str) -> list[PipelineJob] | None:
+        """Re-queue the AI stages only (dossier + outreach), forcing regeneration.
+
+        The completed profile-fetch / media / website stages are left untouched.
+        ``ai_dossier`` gets the higher priority so it runs before ``ai_outreach``.
+        """
+        lead = self._repo.get_lead(lead_id)
+        if lead is None:
+            return None
+
+        payload = json.dumps({"force": True})
+        _, dossier_job = self._repo.enqueue(
+            constants.STAGE_AI_DOSSIER,
+            lead_id,
+            lead.username,
+            lead.username_normalized,
+            payload=payload,
+            priority=10,
+            max_attempts=3,
+            on_duplicate="reenqueue",
+        )
+        _, outreach_job = self._repo.enqueue(
+            constants.STAGE_AI_OUTREACH,
+            lead_id,
+            lead.username,
+            lead.username_normalized,
+            payload=payload,
+            priority=5,
+            max_attempts=3,
+            on_duplicate="reenqueue",
+        )
+        return [dossier_job, outreach_job]
 
     # -- dossiers -----------------------------------------------------------
 

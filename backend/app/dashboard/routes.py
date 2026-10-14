@@ -13,6 +13,7 @@ from app.dashboard.schemas import (
     OutreachOut,
     OutreachUpdateRequest,
     PostOut,
+    RetryAIOut,
     StatsOut,
     WebsitePageOut,
 )
@@ -58,6 +59,21 @@ def retry_lead(
             detail=f"No lead with leadId '{lead_id}'.",
         )
     return JobOut.from_model(job)
+
+
+@router.post("/leads/{lead_id}/retry-ai", response_model=RetryAIOut)
+def retry_ai(
+    lead_id: str,
+    service: DashboardService = Depends(get_dashboard_service),
+) -> RetryAIOut:
+    """Re-queue the AI stages (dossier + outreach) only, forcing regeneration."""
+    jobs = service.retry_ai(lead_id)
+    if jobs is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    return RetryAIOut(lead_id=lead_id, jobs=[JobOut.from_model(job) for job in jobs])
 
 
 @router.get("/dossiers", response_model=DossierListOut)

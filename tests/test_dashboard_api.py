@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.config import get_settings
@@ -55,6 +57,28 @@ def test_retry_lead(api_client, seeded) -> None:
     response = api_client.post(f"/api/v1/leads/{seeded.lead_id}/retry")
     assert response.status_code == 200
     assert response.json()["stage"] == "profile_fetch"
+
+
+def test_retry_ai_enqueues_only_ai_jobs(api_client, seeded, repo: Repository) -> None:
+    response = api_client.post(f"/api/v1/leads/{seeded.lead_id}/retry-ai")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lead_id"] == seeded.lead_id
+    assert {job["stage"] for job in body["jobs"]} == {"ai_dossier", "ai_outreach"}
+
+    # AI jobs are re-queued with a force flag...
+    dossier_job = repo.find_job("ai_dossier", seeded.lead_id)
+    assert dossier_job.status == "queued"
+    assert json.loads(dossier_job.payload)["force"] is True
+
+    # ...and the completed profile/media stages are left untouched.
+    profile_job = repo.find_job("profile_fetch", seeded.lead_id)
+    assert profile_job is not None
+    assert json.loads(profile_job.payload or "{}") == {}
+
+
+def test_retry_ai_missing_lead_returns_404(api_client) -> None:
+    assert api_client.post("/api/v1/leads/ld_nope/retry-ai").status_code == 404
 
 
 def test_list_and_get_dossier(api_client, seeded) -> None:

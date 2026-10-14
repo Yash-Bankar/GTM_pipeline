@@ -4,7 +4,7 @@ from app.ai import AIService, DEFAULT_RUBRIC
 from app.ai.schemas import CriterionScore, DossierDraft, OutreachDraft
 from app.constants import AI_STATUS_ERROR, AI_STATUS_INSUFFICIENT, AI_STATUS_NEEDS_REVIEW
 from app.db.repository import Repository
-from app.db.schemas import Dossier, LeadPost, WebsitePage
+from app.db.schemas import Dossier, LeadPost, PipelineJob, WebsitePage
 from app.providers.errors import AIRateLimitError, AIResponseError
 from app.worker.pipeline import AIDossierStage, AIOutreachStage
 from fakes import FakeAIProvider
@@ -100,6 +100,33 @@ def test_dossier_stage_does_not_regenerate(repo: Repository) -> None:
     stage.run(job, repo)
     assert provider.calls == 1
     assert len(repo.list_dossiers()) == 1
+
+
+def test_dossier_stage_force_regenerates(repo: Repository) -> None:
+    lead = repo.create_or_get_lead("ai.force")[1]
+    _seed_evidence(repo, lead)
+    # Existing dossier that would normally be skipped.
+    repo.upsert_dossier(
+        Dossier(lead_id=lead.lead_id, username=lead.username, status=AI_STATUS_NEEDS_REVIEW, summary="old")
+    )
+    forced_job = PipelineJob(
+        job_id="job_force",
+        stage="ai_dossier",
+        lead_id=lead.lead_id,
+        username=lead.username,
+        username_normalized=lead.username_normalized,
+        status="running",
+        attempt_count=1,
+        max_attempts=3,
+        payload='{"force": true}',
+    )
+    provider = FakeAIProvider(dossier=_full_score_draft(summary="regenerated"))
+
+    outcome = _dossier_stage(provider).run(forced_job, repo)
+
+    assert outcome.ok
+    assert provider.calls == 1
+    assert repo.get_dossier(lead.lead_id).summary == "regenerated"
 
 
 def test_outreach_stage_generates_needs_review_draft(repo: Repository) -> None:

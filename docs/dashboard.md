@@ -43,7 +43,7 @@ SESSION_SECRET=                      # optional HMAC secret for the session cook
 | Route | What it shows |
 | --- | --- |
 | `/leads` | Searchable, filterable leads table; add-lead form; pipeline stats |
-| `/leads/[leadId]` | Profile, recent posts, website pages, job history, re-queue |
+| `/leads/[leadId]` | Profile, recent posts, website pages, job history; re-queue processing or **re-process AI jobs only** |
 | `/dossiers` | Dossier list with qualification score/tier |
 | `/dossiers/[leadId]` | Structured AI findings, criterion scores, cited sources, uncertainty |
 | `/outreach` | Draft list with status filter |
@@ -61,8 +61,9 @@ SESSION_SECRET=                      # optional HMAC secret for the session cook
 ## Backend endpoints used
 
 `GET /api/v1/leads`, `POST /api/v1/leads`, `GET /api/v1/leads/{id}/detail`,
-`POST /api/v1/leads/{id}/retry`, `GET /api/v1/dossiers[/{id}]`,
-`GET /api/v1/outreach[/{id}]`, `PATCH /api/v1/outreach/{id}`, `GET /api/v1/stats`.
+`POST /api/v1/leads/{id}/retry`, `POST /api/v1/leads/{id}/retry-ai`,
+`GET /api/v1/dossiers[/{id}]`, `GET /api/v1/outreach[/{id}]`,
+`PATCH /api/v1/outreach/{id}`, `GET /api/v1/stats`.
 All accept/return typed JSON; the client lives in `frontend/src/lib/api.ts`.
 
 ## Quality checks

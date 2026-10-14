@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { RetryAiButton } from "@/components/retry-ai-button";
 import { RetryButton } from "@/components/retry-button";
 import {
   Badge,
@@ -150,7 +151,7 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
 
         <div className="space-y-5">
           <Card>
-            <CardHeader title="Processing" />
+            <CardHeader title="Processing" subtitle="Re-run stages manually" />
             <div className="space-y-3 px-5 py-4">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-mist-400">Media</span>
@@ -160,7 +161,10 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
                 <span className="text-mist-400">Website</span>
                 <StatusBadge status={lead.website_status || "none"} />
               </div>
-              <RetryButton leadId={lead.lead_id} />
+              <div className="space-y-2 border-t border-ink-800 pt-3">
+                <RetryButton leadId={lead.lead_id} />
+                <RetryAiButton leadId={lead.lead_id} />
+              </div>
             </div>
           </Card>
 

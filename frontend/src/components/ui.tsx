@@ -38,7 +38,22 @@ export function Badge({
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={statusTone(status)}>{humanize(status)}</Badge>;
+  const value = (status || "").toLowerCase();
+  const processing = value === "running";
+  const waiting = value === "queued" || value === "retry";
+  return (
+    <Badge tone={statusTone(status)}>
+      {processing ? (
+        <span
+          aria-hidden
+          className="h-1.5 w-1.5 animate-pulse rounded-full bg-current"
+        />
+      ) : waiting ? (
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current opacity-40" />
+      ) : null}
+      {humanize(status)}
+    </Badge>
+  );
 }
 
 export function TierBadge({ tier }: { tier: string }) {

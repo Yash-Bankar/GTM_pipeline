@@ -8,6 +8,8 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
 RUN npm ci
+# `frontend/.dockerignore` excludes node_modules/.next so this COPY does not
+# clobber the Linux dependencies installed above.
 COPY . .
 # Build-time env: the API is contacted at runtime by the server, not the browser,
 # so no NEXT_PUBLIC_* values are required.

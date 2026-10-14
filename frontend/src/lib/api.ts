@@ -15,6 +15,7 @@ import type {
   LeadSubmission,
   Outreach,
   OutreachList,
+  RetryAiResult,
   Stats,
 } from "./types";
 
@@ -76,6 +77,12 @@ export const api = {
 
   retryLead(leadId: string) {
     return request<unknown>(`/api/v1/leads/${encodeURIComponent(leadId)}/retry`, {
+      method: "POST",
+    });
+  },
+
+  retryAi(leadId: string) {
+    return request<RetryAiResult>(`/api/v1/leads/${encodeURIComponent(leadId)}/retry-ai`, {
       method: "POST",
     });
   },

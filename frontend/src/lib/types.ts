@@ -87,6 +87,11 @@ export interface LeadDetail {
   jobs: Job[];
 }
 
+export interface RetryAiResult {
+  lead_id: string;
+  jobs: Job[];
+}
+
 export interface Dossier {
   lead_id: string;
   username: string;

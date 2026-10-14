@@ -57,3 +57,19 @@ export async function retryLead(leadId: string): Promise<RetryState> {
     };
   }
 }
+
+export async function retryAi(leadId: string): Promise<RetryState> {
+  await requireSession();
+  try {
+    const result = await api.retryAi(leadId);
+    revalidatePath(`/leads/${leadId}`);
+    revalidatePath("/leads");
+    const count = result.jobs?.length ?? 0;
+    return { ok: true, message: `Re-queued ${count} AI job${count === 1 ? "" : "s"}.` };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof ApiError ? error.message : "Could not re-queue AI jobs.",
+    };
+  }
+}

@@ -1,0 +1,13 @@
+# Keep the frontend Docker build context small and deterministic.
+# Without this file, `COPY . .` would copy the host's node_modules (Windows
+# binaries) and .next over the Linux build, which can break or stale the image.
+
+node_modules
+.next
+out
+npm-debug.log*
+*.tsbuildinfo
+
+# Env files (keep the template)
+.env*
+!.env.example

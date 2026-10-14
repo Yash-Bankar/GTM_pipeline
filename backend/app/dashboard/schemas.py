@@ -179,6 +179,13 @@ class LeadDetailOut(BaseModel):
     jobs: list[JobOut] = Field(default_factory=list)
 
 
+class RetryAIOut(BaseModel):
+    """Result of a manual AI re-processing request."""
+
+    lead_id: str
+    jobs: list[JobOut] = Field(default_factory=list)
+
+
 class DossierListOut(BaseModel):
     items: list[DossierOut]
     total: int

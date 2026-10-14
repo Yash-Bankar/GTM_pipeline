@@ -34,6 +34,11 @@ evidence is gathered first), and `ai_dossier` enqueues `ai_outreach`. Both are
 idempotent and store `NEEDS_REVIEW` outputs; nothing is sent. See
 [gemini.md](gemini.md).
 
+**Manual AI re-processing:** `POST /api/v1/leads/{id}/retry-ai` re-queues
+`ai_dossier` (priority 10) and `ai_outreach` (priority 5) with a
+`{"force": true}` payload, so the stages regenerate rather than skip the existing
+output. Profile/media/website jobs are left untouched.
+
 ## `pipeline_jobs` table
 
 Columns: `job_id` (PK), `stage`, `lead_id`, `username`, `username_normalized`,

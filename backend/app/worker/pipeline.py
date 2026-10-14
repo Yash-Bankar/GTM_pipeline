@@ -80,6 +80,19 @@ def _error_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"[:1000]
 
 
+def _job_force(job: PipelineJob) -> bool:
+    """True when the job payload asks the stage to bypass its idempotency guard.
+
+    Used by manual AI re-processing (`{"force": true}`) so an existing dossier /
+    outreach is regenerated rather than skipped.
+    """
+    try:
+        payload = json.loads(job.payload or "{}")
+    except ValueError:
+        return False
+    return bool(isinstance(payload, dict) and payload.get("force"))
+
+
 def _page_id(lead_id: str, url: str) -> str:
     digest = hashlib.sha1(f"{lead_id}|{url}".encode("utf-8")).hexdigest()
     return f"pg_{digest[:20]}"
@@ -368,9 +381,10 @@ class AIDossierStage:
             return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
 
         existing = repo.get_dossier(job.lead_id)
-        if existing is not None and existing.status in (
-            constants.AI_STATUS_NEEDS_REVIEW,
-            "generated",
+        if (
+            not _job_force(job)
+            and existing is not None
+            and existing.status in (constants.AI_STATUS_NEEDS_REVIEW, "generated")
         ):
             return StageOutcome(ok=True, result="dossier already generated")
 
@@ -468,7 +482,11 @@ class AIOutreachStage:
             return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
 
         existing = repo.get_outreach(job.lead_id)
-        if existing is not None and existing.status == constants.AI_STATUS_NEEDS_REVIEW:
+        if (
+            not _job_force(job)
+            and existing is not None
+            and existing.status == constants.AI_STATUS_NEEDS_REVIEW
+        ):
             return StageOutcome(ok=True, result="outreach already generated")
 
         dossier = repo.get_dossier(job.lead_id)

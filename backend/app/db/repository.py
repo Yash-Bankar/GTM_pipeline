@@ -315,6 +315,7 @@ class Repository:
                 row.result = ""
                 row.locked_at = ""
                 row.locked_by = ""
+                row.payload = payload
                 row.updated_at = now
                 self.session.commit()
                 return (False, PipelineJob.model_validate(row))
