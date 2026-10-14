@@ -16,7 +16,7 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-5 hidden h-[calc(100dvh-2.5rem)] w-64 shrink-0 flex-col justify-between rounded-2xl border border-ink-700/80 bg-ink-900/70 p-4 backdrop-blur lg:flex">
+    <aside className="sticky top-5 hidden h-[calc(100dvh-2.5rem)] w-64 shrink-0 flex-col justify-between rounded-2xl border border-white/10 bg-ink-900/50 p-4 shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl lg:flex">
       <div>
         <Link href="/leads" className="flex items-center gap-3 px-2 py-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-500/15 text-lg font-bold text-accent-300">

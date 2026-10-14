@@ -22,7 +22,7 @@
 
   --color-amber-glow: #f5b544;
   --color-rose-alert: #f2637f;
-  --color-violet-haze: #a78bfa;
+  --color-teal-haze: #2dd4bf;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
@@ -33,10 +33,9 @@ html {
 }
 
 body {
-  background:
-    radial-gradient(1100px 600px at 85% -10%, rgba(34, 201, 138, 0.12), transparent 60%),
-    radial-gradient(900px 500px at -10% 10%, rgba(167, 139, 250, 0.1), transparent 55%),
-    var(--color-ink-950);
+  /* The <Aurora /> layer in the root layout paints the moving background; keep
+     the base a calm, deep teal-tinted dark so all text stays readable. */
+  background: var(--color-ink-950);
   color: var(--color-mist-100);
   font-family: var(--font-sans);
   min-height: 100dvh;

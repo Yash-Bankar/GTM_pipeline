@@ -12,7 +12,7 @@ const TONE_CLASSES: Record<Tone, string> = {
   amber: "border-amber-glow/40 bg-amber-glow/15 text-amber-glow",
   red: "border-rose-alert/40 bg-rose-alert/15 text-rose-alert",
   blue: "border-sky-500/40 bg-sky-500/15 text-sky-300",
-  violet: "border-violet-haze/40 bg-violet-haze/15 text-violet-haze",
+  teal: "border-teal-haze/40 bg-teal-haze/15 text-teal-haze",
 };
 
 export function Badge({
@@ -41,15 +41,24 @@ export function StatusBadge({ status }: { status: string }) {
   const value = (status || "").toLowerCase();
   const processing = value === "running";
   const waiting = value === "queued" || value === "retry";
+  const finished = value === "done" || value === "enriched" || value === "approved";
   return (
     <Badge tone={statusTone(status)}>
       {processing ? (
         <span
           aria-hidden
-          className="h-1.5 w-1.5 animate-pulse rounded-full bg-current"
+          className="h-3 w-3 animate-spin rounded-full border-2 border-mist-100/25 border-t-mist-100"
         />
       ) : waiting ? (
-        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current opacity-40" />
+        <span
+          aria-hidden
+          className="h-3 w-3 animate-spin rounded-full border-2 border-dashed border-mist-300/50"
+          style={{ animationDuration: "2.4s" }}
+        />
+      ) : finished ? (
+        <span aria-hidden className="text-[11px] leading-none">
+          ✓
+        </span>
       ) : null}
       {humanize(status)}
     </Badge>
@@ -71,7 +80,7 @@ export function Card({
   return (
     <section
       className={cn(
-        "rounded-2xl border border-ink-700/80 bg-ink-900/70 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset] backdrop-blur",
+        "rounded-2xl border border-white/10 bg-ink-900/55 shadow-[0_8px_30px_rgba(0,0,0,0.35),0_1px_0_rgba(255,255,255,0.06)_inset] backdrop-blur-xl",
         className,
       )}
     >

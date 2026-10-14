@@ -25,7 +25,7 @@ export function humanize(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export type Tone = "neutral" | "green" | "amber" | "red" | "blue" | "violet";
+export type Tone = "neutral" | "green" | "amber" | "red" | "blue" | "teal";
 
 export function statusTone(status: string): Tone {
   switch ((status || "").toLowerCase()) {

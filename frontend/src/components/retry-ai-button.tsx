@@ -19,13 +19,13 @@ export function RetryAiButton({ leadId }: { leadId: string }) {
             setResult(await retryAi(leadId));
           })
         }
-        className="inline-flex items-center gap-2 rounded-lg border border-violet-haze/50 bg-violet-haze/10 px-3 py-1.5 text-xs font-semibold text-violet-haze transition-colors hover:bg-violet-haze/20 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex items-center gap-2 rounded-lg border border-teal-haze/50 bg-teal-haze/10 px-3 py-1.5 text-xs font-semibold text-teal-haze transition-colors hover:bg-teal-haze/20 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? (
           <>
             <span
               aria-hidden
-              className="h-3 w-3 animate-spin rounded-full border-2 border-violet-haze/40 border-t-violet-haze"
+              className="h-3 w-3 animate-spin rounded-full border-2 border-teal-haze/40 border-t-teal-haze"
             />
             Re-queueing AI…
           </>

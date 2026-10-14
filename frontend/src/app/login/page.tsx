@@ -11,7 +11,7 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-ink-700/80 bg-ink-900/80 p-7 backdrop-blur">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-ink-900/55 p-7 shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl">
         <div className="mb-6 flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-500/15 text-lg font-bold text-accent-300">
             S

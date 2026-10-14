@@ -57,7 +57,7 @@ export default async function DossierDetailPage({ params }: { params: Params }) 
             {dossier.topics.length > 0 ? (
               <div className="flex flex-wrap gap-2 border-t border-ink-800 px-5 py-3">
                 {dossier.topics.map((topic) => (
-                  <Badge key={topic} tone="violet">
+                  <Badge key={topic} tone="teal">
                     {topic}
                   </Badge>
                 ))}
