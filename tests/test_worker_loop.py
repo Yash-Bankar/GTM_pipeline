@@ -3,94 +3,87 @@ from __future__ import annotations
 import threading
 
 from app.constants import JOB_DONE, JOB_RETRY
-from app.sheets.schemas import KEY_JOBS
+from app.db.models import PipelineJob as JobORM
+from app.db.repository import Repository
 from app.worker.main import Worker
 from fakes import RecordingStage
 
 
-def _enqueue(job_store, lead_id: str):
-    return job_store.enqueue("profile_fetch", lead_id, lead_id, lead_id)[1]
+def _lead(repo: Repository, name: str):
+    return repo.create_or_get_lead(name)[1]
 
 
-def test_drain_processes_all_jobs(job_store) -> None:
-    for index in range(3):
-        _enqueue(job_store, f"ld_{index}")
+def _enqueue(repo: Repository, lead):
+    return repo.enqueue("profile_fetch", lead.lead_id, lead.username, lead.username_normalized)[1]
+
+
+def test_drain_processes_all_jobs(repo, session_factory) -> None:
+    leads = [_lead(repo, f"loop.{index}") for index in range(3)]
+    for lead in leads:
+        _enqueue(repo, lead)
 
     stage = RecordingStage("profile_fetch")
-    worker = Worker(job_store=job_store, stages={stage.name: stage}, poll_interval=0)
+    worker = Worker(session_factory=session_factory, stages={stage.name: stage}, poll_interval=0)
 
     processed = worker.run(drain=True)
 
     assert processed == 3
     assert len(stage.ran) == 3
-    assert all(row.values["status"] == JOB_DONE for row in job_store.read_rows(KEY_JOBS))
+    assert all(repo.find_job("profile_fetch", lead.lead_id).status == JOB_DONE for lead in leads)
 
 
-def test_max_jobs_bounds_processing(job_store) -> None:
+def test_max_jobs_bounds_processing(repo, session_factory) -> None:
     for index in range(4):
-        _enqueue(job_store, f"ld_{index}")
-
+        _enqueue(repo, _lead(repo, f"max.{index}"))
     stage = RecordingStage("profile_fetch")
-    worker = Worker(job_store=job_store, stages={stage.name: stage}, poll_interval=0)
-
-    processed = worker.run(drain=True, max_jobs=2)
-    assert processed == 2
+    worker = Worker(session_factory=session_factory, stages={stage.name: stage}, poll_interval=0)
+    assert worker.run(drain=True, max_jobs=2) == 2
 
 
-def test_pre_set_stop_event_processes_nothing(job_store) -> None:
-    _enqueue(job_store, "ld_0")
+def test_pre_set_stop_event_processes_nothing(repo, session_factory) -> None:
+    _enqueue(repo, _lead(repo, "stop.0"))
     stop = threading.Event()
     stop.set()
     stage = RecordingStage("profile_fetch")
-    worker = Worker(job_store=job_store, stages={stage.name: stage}, poll_interval=0)
-
-    processed = worker.run(stop_event=stop)
-    assert processed == 0
+    worker = Worker(session_factory=session_factory, stages={stage.name: stage}, poll_interval=0)
+    assert worker.run(stop_event=stop) == 0
 
 
-def test_graceful_shutdown_finishes_current_job(job_store) -> None:
+def test_graceful_shutdown_finishes_current_job(repo, session_factory) -> None:
     for index in range(3):
-        _enqueue(job_store, f"ld_{index}")
-
+        _enqueue(repo, _lead(repo, f"grace.{index}"))
     stop = threading.Event()
 
     def outcome_factory(job):
-        stop.set()  # request shutdown while the first job is running
+        stop.set()
         return None
 
     stage = RecordingStage("profile_fetch", outcome_factory)
-    worker = Worker(job_store=job_store, stages={stage.name: stage}, poll_interval=0)
-
-    processed = worker.run(stop_event=stop)
-
-    assert processed == 1  # finished the in-flight job, then stopped
+    worker = Worker(session_factory=session_factory, stages={stage.name: stage}, poll_interval=0)
+    assert worker.run(stop_event=stop) == 1
 
 
-def test_restart_recovery_requeues_and_processes(job_store) -> None:
-    _enqueue(job_store, "ld_stale")
-    _enqueue(job_store, "ld_ok")
+def test_restart_recovery_requeues_and_processes(repo, session_factory) -> None:
+    stale_lead = _lead(repo, "stale.0")
+    _enqueue(repo, stale_lead)
+    other_lead = _lead(repo, "stale.1")
+    _enqueue(repo, other_lead)
 
-    stale = job_store.claim_next(worker_id="w1")
-    assert stale is not None and stale.lead_id == "ld_stale"
-    # Simulate a crash: leave it running with an old lock.
-    job_store.update_by_key(KEY_JOBS, stale.job_id, {"lockedAt": "2000-01-01T00:00:00+00:00"})
+    claimed = repo.claim_next(worker_id="w1")
+    row = repo.session.get(JobORM, claimed.job_id)
+    row.locked_at = "2000-01-01T00:00:00+00:00"
+    repo.session.commit()
 
     stage = RecordingStage("profile_fetch")
-    worker = Worker(job_store=job_store, stages={stage.name: stage}, poll_interval=0, stale_minutes=30)
-
+    worker = Worker(session_factory=session_factory, stages={stage.name: stage}, poll_interval=0, stale_minutes=30)
     processed = worker.run(drain=True)
 
-    assert processed == 2  # recovered stale job + the queued one
-    assert len(stage.ran) == 2
-    assert all(row.values["status"] == JOB_DONE for row in job_store.read_rows(KEY_JOBS))
+    assert processed == 2
+    assert repo.find_job("profile_fetch", stale_lead.lead_id).status == JOB_DONE
+    assert repo.find_job("profile_fetch", other_lead.lead_id).status == JOB_DONE
 
-def test_poll_interval_has_minimum_floor(job_store) -> None:
+
+def test_poll_interval_has_minimum_floor(repo, session_factory) -> None:
     stage = RecordingStage("profile_fetch")
-    worker = Worker(job_store=job_store, stages={stage.name: stage}, poll_interval=0.0)
-    assert worker._poll_interval >= 5.0
-
-
-def test_poll_interval_default_is_at_least_floor(job_store) -> None:
-    stage = RecordingStage("profile_fetch")
-    worker = Worker(job_store=job_store, stages={stage.name: stage})
+    worker = Worker(session_factory=session_factory, stages={stage.name: stage}, poll_interval=0.0)
     assert worker._poll_interval >= 5.0

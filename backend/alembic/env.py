@@ -1,0 +1,54 @@
+"""Alembic migration environment.
+
+Reads ``DATABASE_URL`` from the application settings and uses ``Base.metadata``
+from ``app.db.models`` as the autogenerate target.
+"""
+
+from __future__ import annotations
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+from app.config import get_settings
+from app.db.database import Base
+import app.db.models  # noqa: F401  (ensure all models are registered)
+
+config = context.config
+
+target_metadata = Base.metadata
+
+
+def get_url() -> str:
+    return get_settings().database_url
+
+
+def run_migrations_offline() -> None:
+    context.configure(
+        url=get_url(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    configuration = config.get_section(config.config_ini_section, {})
+    configuration["sqlalchemy.url"] = get_url()
+    connectable = engine_from_config(
+        configuration, prefix="sqlalchemy.", poolclass=pool.NullPool
+    )
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection, target_metadata=target_metadata, compare_type=True
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

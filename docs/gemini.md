@@ -47,7 +47,7 @@ AI_EVIDENCE_TEXT_CHARS=1500
 - `GEMINI_MODEL` selects the model; a wrong model surfaces as `AIModelError`
   (HTTP 404).
 
-## Outputs (Google Sheets, keyed by `leadId`)
+## Outputs (PostgreSQL, keyed by `lead_id`)
 
 ### `Dossiers`
 

@@ -1,21 +1,6 @@
-"""In-memory fake implementing the SheetsClient interface.
-
-Used by unit tests as the "mocked Google Sheets client" so the storage layer can
-be exercised without network access or credentials.
-"""
+"""Test doubles for providers and worker stages (database layer uses SQLite)."""
 
 from __future__ import annotations
-
-from googleapiclient.errors import HttpError
-from httplib2 import Response
-
-from app.sheets.client import SheetsClient
-from app.sheets.errors import SheetsApiError
-
-
-def make_http_error(status: int, message: str = "error") -> HttpError:
-    """Build a real googleapiclient HttpError with the given status code."""
-    return HttpError(Response({"status": status}), message.encode("utf-8"))
 
 
 def make_profile(username: str = "creator", **overrides: object):
@@ -41,18 +26,6 @@ def make_profile(username: str = "creator", **overrides: object):
     }
     data.update(overrides)
     return HikerProfile(**data)
-
-
-class FakeHikerClient:
-    """Stand-in for HikerAPIClient: ``handler(username)`` returns a profile or raises."""
-
-    def __init__(self, handler) -> None:
-        self._handler = handler
-        self.calls = 0
-
-    def fetch_profile(self, username: str):
-        self.calls += 1
-        return self._handler(username)
 
 
 def make_post(post_id: str = "1001", **overrides: object):
@@ -93,6 +66,18 @@ def make_fetched_page(url: str, *, status: str = "done", **overrides: object):
     }
     data.update(overrides)
     return FetchedPage(**data)
+
+
+class FakeHikerClient:
+    """Stand-in for HikerAPIClient: ``handler(username)`` returns a profile or raises."""
+
+    def __init__(self, handler) -> None:
+        self._handler = handler
+        self.calls = 0
+
+    def fetch_profile(self, username: str):
+        self.calls += 1
+        return self._handler(username)
 
 
 class FakeMediaClient:
@@ -155,106 +140,9 @@ class RecordingStage:
         self.ran: list[str] = []
         self._outcome_factory = outcome_factory or (lambda job: None)
 
-    def run(self, job):
+    def run(self, job, repo=None):
         from app.worker.pipeline import StageOutcome
 
         self.ran.append(job.job_id)
         outcome = self._outcome_factory(job)
         return outcome if outcome is not None else StageOutcome(ok=True, result="ok")
-
-
-
-
-class FakeSheetsClient(SheetsClient):
-    def __init__(self, tabs: dict[str, list[list[str]]] | None = None) -> None:
-        self.tabs: dict[str, list[list[str]]] = {}
-        for name, rows in (tabs or {}).items():
-            self.tabs[name] = [list(row) for row in rows]
-        self.append_calls = 0
-        self.update_calls = 0
-        self.titles_calls = 0
-        self.read_tab_calls = 0
-        self.read_row_calls = 0
-        self.created_tabs: list[str] = []
-
-    def _require(self, tab: str) -> None:
-        if tab not in self.tabs:
-            raise SheetsApiError(f"tab not found: {tab}")
-
-    def list_tab_titles(self) -> list[str]:
-        self.titles_calls += 1
-        return list(self.tabs.keys())
-
-    def read_tab(self, tab: str) -> list[list[str]]:
-        self.read_tab_calls += 1
-        self._require(tab)
-        return [list(row) for row in self.tabs[tab]]
-
-    def read_tabs(self, tabs: list[str]) -> dict[str, list[list[str]]]:
-        return {tab: self.read_tab(tab) for tab in tabs}
-
-    def read_row(self, tab: str, row_number: int) -> list[str]:
-        self.read_row_calls += 1
-        self._require(tab)
-        rows = self.tabs[tab]
-        if 1 <= row_number <= len(rows):
-            return list(rows[row_number - 1])
-        return []
-
-    def append_rows(self, tab: str, rows: list[list[str]]) -> None:
-        self._require(tab)
-        self.append_calls += 1
-        self.tabs[tab].extend([list(row) for row in rows])
-
-    def update_cells(self, tab: str, updates: list[tuple[int, int, str]]) -> None:
-        self._require(tab)
-        self.update_calls += 1
-        rows = self.tabs[tab]
-        for row_number, column, value in updates:
-            while len(rows) < row_number:
-                rows.append([])
-            row = rows[row_number - 1]
-            while len(row) <= column:
-                row.append("")
-            row[column] = value
-
-    def create_tab(self, title: str) -> None:
-        if title in self.tabs:
-            raise SheetsApiError(f"tab already exists: {title}")
-        self.tabs[title] = []
-        self.created_tabs.append(title)
-
-
-class RaisingSheetsClient(SheetsClient):
-    """A client whose every call raises a configured exception.
-
-    Used to verify that storage failures surface as clear HTTP responses.
-    """
-
-    def __init__(self, exc: BaseException) -> None:
-        self._exc = exc
-
-    def _raise(self) -> None:
-        raise self._exc
-
-    def list_tab_titles(self) -> list[str]:
-        self._raise()
-
-    def read_tab(self, tab: str) -> list[list[str]]:
-        self._raise()
-
-    def read_tabs(self, tabs: list[str]) -> dict[str, list[list[str]]]:
-        self._raise()
-
-    def read_row(self, tab: str, row_number: int) -> list[str]:
-        self._raise()
-
-    def append_rows(self, tab: str, rows: list[list[str]]) -> None:
-        self._raise()
-
-    def update_cells(self, tab: str, updates: list[tuple[int, int, str]]) -> None:
-        self._raise()
-
-    def create_tab(self, title: str) -> None:
-        self._raise()
-

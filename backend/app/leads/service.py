@@ -1,18 +1,13 @@
-"""Lead application service.
-
-Coordinates validation, deduplication and the Google Sheets repository. The API
-layer talks to this service; it never touches the sheets client directly.
-"""
+"""Lead application service (database-backed)."""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 
-from app.constants import STAGE_PROFILE_FETCH
-from app.sheets.repository import JobStore, LeadStore
-from app.sheets.schemas import KEY_IG_LEADS
-from app.sheets.models import Lead
+from app import constants
+from app.db.repository import Repository
+from app.db.schemas import Lead
 
 from .schemas import LEAD_STATUS_QUEUED, LeadCreateRequest
 from .validation import parse_lead_input
@@ -35,32 +30,25 @@ class LeadSubmission:
 
 
 class LeadService:
-    def __init__(self, store: LeadStore, *, job_store: JobStore | None = None) -> None:
-        self._store = store
-        self._job_store = job_store
+    def __init__(self, repo: Repository) -> None:
+        self._repo = repo
 
     def submit(self, request: LeadCreateRequest) -> LeadSubmission:
-        """Create a lead or return the existing one (deduplicated).
-
-        New leads are enqueued for the `profile_fetch` stage. Enqueueing is
-        idempotent per ``(stage, lead)`` so duplicate submissions do not create
-        duplicate jobs.
-        """
+        """Create a lead or return the existing one (deduplicated), then enqueue it."""
         parsed = parse_lead_input(request.username)
-        created, lead = self._store.create_or_get_lead(
+        created, lead = self._repo.create_or_get_lead(
             parsed.username,
             source=request.source or "api",
             status=LEAD_STATUS_QUEUED,
             profile_url=parsed.profile_url,
         )
-        if self._job_store is not None:
-            self._job_store.enqueue(
-                STAGE_PROFILE_FETCH,
-                lead.lead_id,
-                lead.username,
-                lead.username_normalized,
-                max_attempts=3,
-            )
+        self._repo.enqueue(
+            constants.STAGE_PROFILE_FETCH,
+            lead.lead_id,
+            lead.username,
+            lead.username_normalized,
+            max_attempts=3,
+        )
         logger.info(
             "Lead submission @%s -> %s (leadId=%s)",
             parsed.normalized,
@@ -70,8 +58,7 @@ class LeadService:
         return LeadSubmission(created=created, lead=lead)
 
     def get(self, lead_id: str) -> Lead | None:
-        record = self._store.find_row(KEY_IG_LEADS, lead_id)
-        return Lead.model_validate(record.values) if record is not None else None
+        return self._repo.get_lead(lead_id)
 
     def list(
         self,
@@ -82,7 +69,7 @@ class LeadService:
         status: str | None = None,
     ) -> tuple[list[Lead], int]:
         """Return a filtered, newest-first page of leads plus the total count."""
-        leads = [Lead.model_validate(rec.values) for rec in self._store.read_rows(KEY_IG_LEADS)]
+        leads = self._repo.list_leads()
 
         if status:
             wanted = status.strip().lower()
@@ -90,16 +77,11 @@ class LeadService:
 
         if search and search.strip():
             needle = search.strip().casefold()
-            leads = [
-                lead
-                for lead in leads
-                if needle in _search_blob(lead).casefold()
-            ]
+            leads = [lead for lead in leads if needle in _search_blob(lead).casefold()]
 
         leads.sort(key=lambda lead: (lead.created_at, lead.lead_id), reverse=True)
         total = len(leads)
-        page = leads[offset : offset + limit]
-        return page, total
+        return leads[offset : offset + limit], total
 
 
 def _search_blob(lead: Lead) -> str:

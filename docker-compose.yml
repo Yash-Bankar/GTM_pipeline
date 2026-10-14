@@ -1,12 +1,29 @@
 # Synpo GTM Automation - local/production orchestration.
 #
-#   docker compose up --build            # API + worker
+#   docker compose up --build            # postgres + API + worker
 #   docker compose --profile frontend up # also run the Next.js dashboard
 #
-# Secrets come from the repo-root `.env` (never baked into the image) and the
-# service-account JSON is mounted read-only from ./backend/secrets.
+# Configuration comes from the repo-root `.env` (never baked into images).
 
 services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: synpo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d synpo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   api:
     build:
       context: .
@@ -15,9 +32,7 @@ services:
     env_file:
       - .env
     environment:
-      GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/service-account.json
-    volumes:
-      - ./backend/secrets:/app/secrets:ro
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/synpo
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -28,6 +43,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
@@ -37,7 +55,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 30s
 
   worker:
     image: synpo-gtm-backend:local
@@ -48,9 +66,7 @@ services:
     env_file:
       - .env
     environment:
-      GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/service-account.json
-    volumes:
-      - ./backend/secrets:/app/secrets:ro
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/synpo
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -59,7 +75,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    # IMPORTANT: run exactly ONE worker instance (single-writer, spreadsheet-backed).
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    # IMPORTANT: run exactly ONE worker instance.
 
   frontend:
     profiles: ["frontend"]
@@ -79,3 +100,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+volumes:
+  postgres_data:

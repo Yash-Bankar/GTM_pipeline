@@ -4,22 +4,18 @@ import sys
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # Make the tests directory importable (for `fakes`) in addition to `backend`
 # (which pytest adds via pythonpath in pytest.ini).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.sheets.repository import JobStore, LeadStore  # noqa: E402
-from app.sheets.schemas import (  # noqa: E402
-    DOSSIERS_HEADERS,
-    ENRICHED_HEADERS,
-    IG_LEADS_HEADERS,
-    LEAD_POSTS_HEADERS,
-    OUTREACH_HEADERS,
-    PIPELINE_JOBS_HEADERS,
-    WEBSITE_PAGES_HEADERS,
-)
-from fakes import FakeSheetsClient  # noqa: E402
+import app.db.models  # noqa: E402,F401  (register ORM models)
+from app.config import get_settings  # noqa: E402
+from app.db.database import Base  # noqa: E402
+from app.db.repository import Repository  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -28,8 +24,6 @@ def _isolate_api_key(monkeypatch):
 
     Tests that exercise auth set API_KEY themselves (and clear the cache).
     """
-    from app.config import get_settings
-
     monkeypatch.setenv("API_KEY", "")
     get_settings.cache_clear()
     yield
@@ -37,72 +31,52 @@ def _isolate_api_key(monkeypatch):
 
 
 @pytest.fixture
-def ig_client() -> FakeSheetsClient:
-    """A fake client with the canonical `IG Leads` and `Pipeline Jobs` headers."""
-    return FakeSheetsClient(
-        {
-            "IG Leads": [list(IG_LEADS_HEADERS)],
-            "Pipeline Jobs": [list(PIPELINE_JOBS_HEADERS)],
-        }
+def engine():
+    """A fresh in-memory SQLite database per test."""
+    test_engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
+    Base.metadata.create_all(test_engine)
+    yield test_engine
+    test_engine.dispose()
 
 
 @pytest.fixture
-def worker_stores():
-    """Stores sharing one fake client, including the enriched/post/website/AI tabs."""
-    from types import SimpleNamespace
-
-    from app.sheets.repository import SheetStore
-
-    client = FakeSheetsClient(
-        {
-            "IG Leads": [list(IG_LEADS_HEADERS)],
-            "Pipeline Jobs": [list(PIPELINE_JOBS_HEADERS)],
-            "instagram_leads_enriched": [list(ENRICHED_HEADERS)],
-            "Lead Posts": [list(LEAD_POSTS_HEADERS)],
-            "Website Pages": [list(WEBSITE_PAGES_HEADERS)],
-            "Dossiers": [list(DOSSIERS_HEADERS)],
-            "Outreach": [list(OUTREACH_HEADERS)],
-        }
-    )
-    return SimpleNamespace(
-        client=client,
-        lead=LeadStore(client),
-        jobs=JobStore(client),
-        enriched=SheetStore(client),
-        posts=SheetStore(client),
-        website=SheetStore(client),
-        dossiers=SheetStore(client),
-        outreach=SheetStore(client),
-    )
+def session_factory(engine):
+    # expire_on_commit=True so post-commit reads see other sessions' writes.
+    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=True)
 
 
 @pytest.fixture
-def lead_store(ig_client: FakeSheetsClient) -> LeadStore:
-    return LeadStore(ig_client)
+def session(session_factory):
+    db = session_factory()
+    yield db
+    db.close()
 
 
 @pytest.fixture
-def job_store(ig_client: FakeSheetsClient) -> JobStore:
-    return JobStore(ig_client)
+def repo(session) -> Repository:
+    return Repository(session)
 
 
 @pytest.fixture
-def api_store(ig_client: FakeSheetsClient) -> LeadStore:
-    return LeadStore(ig_client, tab_names={"ig_leads": "IG Leads"})
-
-
-@pytest.fixture
-def api_client(api_store: LeadStore, job_store: JobStore):
-    """A FastAPI TestClient whose lead service is backed by the fake stores."""
+def api_client(session_factory):
+    """FastAPI TestClient bound to the test database."""
     from fastapi.testclient import TestClient
 
-    from app.dependencies import get_lead_service
-    from app.leads.service import LeadService
+    from app.db.database import get_db
     from app.main import app
 
-    service = LeadService(api_store, job_store=job_store)
-    app.dependency_overrides[get_lead_service] = lambda: service
+    def _override_get_db():
+        db = session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _override_get_db
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()

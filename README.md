@@ -3,12 +3,12 @@
 Automation for a GTM (go-to-market) pipeline built around Instagram creator
 discovery: collect creator handles, deduplicate them, enrich them with public
 Instagram + website data, generate personalized outreach with AI, and track every
-stage in Google Sheets.
+stage in PostgreSQL.
 
-> Status: **foundation only.** This repository currently contains project
-> scaffolding, configuration, and documentation. No business logic has been
-> implemented yet. See [docs/architecture.md](docs/architecture.md) for the
-> proposed architecture and phase boundaries.
+> Status: **feature-complete MVP.** Lead capture, autonomous worker, Instagram +
+> website enrichment, Gemini dossiers/outreach, the Next.js dashboard, and the
+> Chrome extension are implemented. See
+> [docs/architecture.md](docs/architecture.md) for architecture and phases.
 
 ## Target stack
 
@@ -17,11 +17,11 @@ stage in Google Sheets.
 | Frontend | Next.js (App Router) + React + TypeScript + Tailwind CSS |
 | Backend API | Python + FastAPI |
 | Background worker | Python (long-running process) |
-| Operational data | Google Sheets (source of truth) |
+| Operational data | **PostgreSQL** (source of truth; SQLAlchemy + Alembic) |
 | Instagram data | HikerAPI |
 | AI generation | Google Gemini (initially) |
 | Agent orchestration | Hermes Agent (later) |
-| Persistence | **None** for this MVP — no SQL or NoSQL database |
+| Persistence | PostgreSQL only — no Google Sheets |
 
 ## Repository layout
 
@@ -37,11 +37,12 @@ synpo-gtm-automation/
 │  │  ├─ common/      Shared helpers (retry)
 │  │  ├─ leads/       Lead API: validation, service, routes (Phase 2)
 │  │  ├─ providers/   HikerAPI client + normalization (Phase 3)
-│  │  └─ sheets/      Google Sheets storage layer (Phase 1)
+│  │  └─ db/          PostgreSQL storage: models + repository (Phase 11)
+│  ├─ alembic/        Database migrations
 │  └─ requirements.txt
 ├─ docs/
 │  ├─ architecture.md      Proposed architecture, data flow, phase boundaries
-│  ├─ sheets-contract.md   Google Sheets tab schemas and setup
+│  ├─ database.md          PostgreSQL schema and contracts (Phase 11)
 │  ├─ api.md               Lead API reference (Phase 2)
 │  ├─ hikerapi.md          HikerAPI provider reference (Phase 3)
 │  ├─ worker.md            Autonomous worker reference (Phase 4)
@@ -50,8 +51,8 @@ synpo-gtm-automation/
 │  ├─ dashboard.md         Next.js dashboard + access control (Phase 7)
 │  ├─ deployment.md        Containers, production, Kubernetes (Phase 10)
 │  └─ runbook.md           End-to-end test runbook
-├─ scripts/           Helper scripts (verify_sheets.py, check_*.py)
-├─ tests/             Unit tests (mocked Sheets client)
+├─ scripts/           Helper scripts (verify_db.py, check_*.py)
+├─ tests/             Unit tests (in-memory SQLite)
 ├─ Dockerfile         Backend + worker image (non-root, no secrets)
 ├─ docker-compose.yml Local orchestration (api + worker [+ dashboard profile])
 ├─ .dockerignore
@@ -123,31 +124,30 @@ npx tsc --noEmit
 npm run build
 ```
 
-## Google Sheets storage (Phase 1)
+## Storage (PostgreSQL)
 
-Google Sheets is the source of truth; there is no database. The storage adapter
-is in `backend/app/sheets/` and maps rows to typed models by header name. See
-[docs/sheets-contract.md](docs/sheets-contract.md) for the tab schemas, identity
-rules, and the non-destructive header policy.
+PostgreSQL is the single source of truth. The storage layer is
+`backend/app/db/` (SQLAlchemy models + repository); the schema is managed by
+Alembic. See [docs/database.md](docs/database.md).
 
-Run the unit tests (in-memory fake client, no credentials needed):
+```powershell
+# start Postgres (or use docker compose)
+docker run --name synpo-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=synpo -p 5432:5432 -d postgres:15-alpine
+
+# apply migrations + verify
+cd backend; .\.venv\Scripts\python.exe -m alembic upgrade head; cd ..
+.\backend\.venv\Scripts\python.exe scripts\verify_db.py
+```
+
+Run the unit tests (in-memory SQLite, no external services):
 
 ```powershell
 .\backend\.venv\Scripts\python.exe -m pytest
 ```
 
-Verify your development spreadsheet (requires `secrets/service-account.json` and
-`.env`):
-
-```powershell
-.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --check-only
-.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --create-missing-tabs --extend-headers
-.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --write-test-row
-```
-
 ## Lead API (Phase 2)
 
-Submit and retrieve leads over HTTP; the browser never accesses Google Sheets
+Submit and retrieve leads over HTTP; the browser never accesses the database
 directly. See [docs/api.md](docs/api.md) for the full reference.
 
 ```powershell
@@ -246,8 +246,8 @@ Containerize and run everything with Docker Compose, or deploy the pieces to
 production (including Kubernetes). See [docs/deployment.md](docs/deployment.md).
 
 ```powershell
-Copy-Item .env.example .env          # + backend/secrets/service-account.json
-docker compose up --build            # API + worker
+Copy-Item .env.example .env          # set DATABASE_URL, HIKERAPI_KEY, GEMINI_API_KEY, API_KEY
+docker compose up --build            # postgres + API + worker
 docker compose --profile frontend up # + dashboard (http://localhost:3000)
 ```
 
@@ -255,15 +255,15 @@ For a full end-to-end verification, follow [docs/runbook.md](docs/runbook.md).
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — components, data flow, Google
-  Sheets data contract, and the phased implementation plan.
+- [docs/architecture.md](docs/architecture.md) — components, data flow,
+  PostgreSQL data contract, and the phased implementation plan.
 - [CLAUDE.md](CLAUDE.md) — conventions and guardrails for contributors and
   coding agents.
 
 ## Ground rules
 
-- **Google Sheets is the single source of truth** for operational data in this MVP.
-- **No database** (SQL or NoSQL) is introduced for the MVP.
+- **PostgreSQL is the single source of truth** for operational data.
+- **No Google Sheets / no second datastore.** All state lives in Postgres.
 - **No secrets in code or git.** Use `.env` (gitignored) with `.env.example` as
   the template.
 - **Do not copy the legacy repository's architecture.** The old

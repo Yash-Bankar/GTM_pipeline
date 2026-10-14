@@ -3,31 +3,22 @@ from __future__ import annotations
 from app.ai import AIService, DEFAULT_RUBRIC
 from app.ai.schemas import CriterionScore, DossierDraft, OutreachDraft
 from app.constants import AI_STATUS_ERROR, AI_STATUS_INSUFFICIENT, AI_STATUS_NEEDS_REVIEW
+from app.db.repository import Repository
+from app.db.schemas import Dossier, LeadPost, WebsitePage
 from app.providers.errors import AIRateLimitError, AIResponseError
-from app.sheets.models import Dossier, LeadPost, WebsitePage
-from app.sheets.schemas import (
-    KEY_DOSSIERS,
-    KEY_IG_LEADS,
-    KEY_OUTREACH,
-    KEY_POSTS,
-    KEY_WEBSITE_PAGES,
-)
 from app.worker.pipeline import AIDossierStage, AIOutreachStage
 from fakes import FakeAIProvider
 
 
-def _seed_evidence(store, lead, *, bio="Finance educator."):
-    store.lead.update_by_key(KEY_IG_LEADS, lead.lead_id, {"bio": bio})
-    store.posts.append_model(
-        KEY_POSTS, LeadPost(postId="p1", leadId=lead.lead_id, caption="Investing basics")
-    )
-    store.website.append_model(
-        KEY_WEBSITE_PAGES,
-        WebsitePage(pageId="pg1", leadId=lead.lead_id, url="https://x.test", title="About", text="Coaching"),
+def _seed_evidence(repo: Repository, lead, bio: str = "Finance educator.") -> None:
+    repo.update_lead(lead.lead_id, {"bio": bio})
+    repo.upsert_post(LeadPost(post_id="p1", lead_id=lead.lead_id, caption="Investing basics"))
+    repo.upsert_website_page(
+        WebsitePage(page_id="pg1", lead_id=lead.lead_id, url="https://x.test", title="About", text="Coaching")
     )
 
 
-def _full_score_draft(summary="Finance educator."):
+def _full_score_draft(summary: str = "Finance educator.") -> DossierDraft:
     return DossierDraft(
         summary=summary,
         topics=["investing"],
@@ -36,154 +27,117 @@ def _full_score_draft(summary="Finance educator."):
     )
 
 
-def _dossier_stage(store, provider):
-    return AIDossierStage(
-        AIService(provider),
-        store.lead,
-        store.posts,
-        store.website,
-        store.dossiers,
-        model_name="gemini-test",
-        job_store=store.jobs,
-    )
+def _dossier_stage(provider) -> AIDossierStage:
+    return AIDossierStage(AIService(provider), model_name="gemini-test")
 
 
-def _outreach_stage(store, provider):
-    return AIOutreachStage(
-        AIService(provider),
-        store.lead,
-        store.posts,
-        store.website,
-        store.dossiers,
-        store.outreach,
-        model_name="gemini-test",
-    )
+def _outreach_stage(provider) -> AIOutreachStage:
+    return AIOutreachStage(AIService(provider), model_name="gemini-test")
 
 
-def test_dossier_stage_generates_and_enqueues_outreach(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.one")
-    _seed_evidence(worker_stores, lead)
-    worker_stores.jobs.enqueue("ai_dossier", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
+def _dossier_job(repo: Repository, name: str):
+    lead = repo.create_or_get_lead(name)[1]
+    repo.enqueue("ai_dossier", lead.lead_id, lead.username, lead.username_normalized)
+    return lead, repo.claim_next(worker_id="w1")
 
+
+def _outreach_job(repo: Repository, name: str):
+    lead = repo.create_or_get_lead(name)[1]
+    repo.enqueue("ai_outreach", lead.lead_id, lead.username, lead.username_normalized)
+    return lead, repo.claim_next(worker_id="w1")
+
+
+def test_dossier_stage_generates_and_enqueues_outreach(repo: Repository) -> None:
+    lead, job = _dossier_job(repo, "ai.one")
+    _seed_evidence(repo, lead)
     provider = FakeAIProvider(dossier=_full_score_draft())
-    outcome = _dossier_stage(worker_stores, provider).run(job)
+
+    outcome = _dossier_stage(provider).run(job, repo)
 
     assert outcome.ok
-    row = worker_stores.dossiers.find_row(KEY_DOSSIERS, lead.lead_id, key_header="leadId")
-    assert row.values["status"] == AI_STATUS_NEEDS_REVIEW
-    assert row.values["qualificationScore"] == "100"
-    assert row.values["qualificationTier"] == "A"
-    assert row.values["summary"] == "Finance educator."
-    assert worker_stores.jobs.find_job("ai_outreach", lead.lead_id) is not None
+    dossier = repo.get_dossier(lead.lead_id)
+    assert dossier.status == AI_STATUS_NEEDS_REVIEW
+    assert dossier.qualification_score == 100
+    assert dossier.qualification_tier == "A"
+    assert dossier.summary == "Finance educator."
+    assert repo.find_job("ai_outreach", lead.lead_id) is not None
 
 
-def test_dossier_stage_insufficient_evidence_skips_ai(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.empty")
-    worker_stores.jobs.enqueue("ai_dossier", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
-
+def test_dossier_stage_insufficient_evidence_skips_ai(repo: Repository) -> None:
+    lead, job = _dossier_job(repo, "ai.empty")
     provider = FakeAIProvider(dossier=_full_score_draft())
-    outcome = _dossier_stage(worker_stores, provider).run(job)
-
+    outcome = _dossier_stage(provider).run(job, repo)
     assert outcome.ok
     assert provider.calls == 0
-    row = worker_stores.dossiers.find_row(KEY_DOSSIERS, lead.lead_id, key_header="leadId")
-    assert row.values["status"] == AI_STATUS_INSUFFICIENT
+    assert repo.get_dossier(lead.lead_id).status == AI_STATUS_INSUFFICIENT
 
 
-def test_dossier_stage_malformed_response_is_terminal(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.bad")
-    _seed_evidence(worker_stores, lead)
-    worker_stores.jobs.enqueue("ai_dossier", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
-
+def test_dossier_stage_malformed_response_is_terminal(repo: Repository) -> None:
+    lead, job = _dossier_job(repo, "ai.bad")
+    _seed_evidence(repo, lead)
     provider = FakeAIProvider(error=AIResponseError("bad json"))
-    outcome = _dossier_stage(worker_stores, provider).run(job)
-
+    outcome = _dossier_stage(provider).run(job, repo)
     assert outcome.ok is False
     assert outcome.retryable is False
-    assert worker_stores.dossiers.find_row(KEY_DOSSIERS, lead.lead_id, key_header="leadId").values["status"] == AI_STATUS_ERROR
+    assert repo.get_dossier(lead.lead_id).status == AI_STATUS_ERROR
 
 
-def test_dossier_stage_rate_limit_is_retryable(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.rate")
-    _seed_evidence(worker_stores, lead)
-    worker_stores.jobs.enqueue("ai_dossier", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
-
+def test_dossier_stage_rate_limit_is_retryable(repo: Repository) -> None:
+    lead, job = _dossier_job(repo, "ai.rate")
+    _seed_evidence(repo, lead)
     provider = FakeAIProvider(error=AIRateLimitError("429"))
-    outcome = _dossier_stage(worker_stores, provider).run(job)
-
+    outcome = _dossier_stage(provider).run(job, repo)
     assert outcome.ok is False
     assert outcome.retryable is True
 
 
-def test_dossier_stage_does_not_regenerate(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.dup")
-    _seed_evidence(worker_stores, lead)
-    worker_stores.jobs.enqueue("ai_dossier", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
-
+def test_dossier_stage_does_not_regenerate(repo: Repository) -> None:
+    lead, job = _dossier_job(repo, "ai.dup")
+    _seed_evidence(repo, lead)
     provider = FakeAIProvider(dossier=_full_score_draft())
-    stage = _dossier_stage(worker_stores, provider)
-    stage.run(job)
-    stage.run(job)  # duplicate run
-
+    stage = _dossier_stage(provider)
+    stage.run(job, repo)
+    stage.run(job, repo)
     assert provider.calls == 1
-    assert len(worker_stores.dossiers.read_rows(KEY_DOSSIERS)) == 1
+    assert len(repo.list_dossiers()) == 1
 
 
-def test_outreach_stage_generates_needs_review_draft(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.out")
-    _seed_evidence(worker_stores, lead)
-    worker_stores.dossiers.upsert_model(
-        KEY_DOSSIERS,
-        Dossier(leadId=lead.lead_id, username=lead.username, status=AI_STATUS_NEEDS_REVIEW, summary="Finance educator."),
+def test_outreach_stage_generates_needs_review_draft(repo: Repository) -> None:
+    lead, job = _outreach_job(repo, "ai.out")
+    _seed_evidence(repo, lead)
+    repo.upsert_dossier(
+        Dossier(lead_id=lead.lead_id, username=lead.username, status=AI_STATUS_NEEDS_REVIEW, summary="Finance educator.")
     )
-    worker_stores.jobs.enqueue("ai_outreach", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
+    provider = FakeAIProvider(outreach=OutreachDraft(emailSubject="Hi", emailBody="Body text", dmBody="DM text"))
 
-    provider = FakeAIProvider(
-        outreach=OutreachDraft(emailSubject="Hi", emailBody="Body text", dmBody="DM text")
-    )
-    outcome = _outreach_stage(worker_stores, provider).run(job)
+    outcome = _outreach_stage(provider).run(job, repo)
 
     assert outcome.ok
-    row = worker_stores.outreach.find_row(KEY_OUTREACH, lead.lead_id, key_header="leadId")
-    assert row.values["status"] == AI_STATUS_NEEDS_REVIEW
-    assert row.values["subject"] == "Hi"
-    assert row.values["body"] == "Body text"
-    assert row.values["dmBody"] == "DM text"
+    entry = repo.get_outreach(lead.lead_id)
+    assert entry.status == AI_STATUS_NEEDS_REVIEW
+    assert entry.subject == "Hi"
+    assert entry.body == "Body text"
+    assert entry.dm_body == "DM text"
 
 
-def test_outreach_stage_skips_without_dossier(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.nodossier")
-    worker_stores.jobs.enqueue("ai_outreach", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
-
+def test_outreach_stage_skips_without_dossier(repo: Repository) -> None:
+    _lead, job = _outreach_job(repo, "ai.nodossier")
     provider = FakeAIProvider(outreach=OutreachDraft(emailSubject="x"))
-    outcome = _outreach_stage(worker_stores, provider).run(job)
-
+    outcome = _outreach_stage(provider).run(job, repo)
     assert outcome.ok
     assert provider.calls == 0
-    assert worker_stores.outreach.read_rows(KEY_OUTREACH) == []
+    assert repo.list_outreach() == []
 
 
-def test_outreach_stage_does_not_regenerate(worker_stores) -> None:
-    lead = worker_stores.lead.create_lead("ai.outdup")
-    _seed_evidence(worker_stores, lead)
-    worker_stores.dossiers.upsert_model(
-        KEY_DOSSIERS,
-        Dossier(leadId=lead.lead_id, username=lead.username, status=AI_STATUS_NEEDS_REVIEW, summary="s"),
+def test_outreach_stage_does_not_regenerate(repo: Repository) -> None:
+    lead, job = _outreach_job(repo, "ai.outdup")
+    _seed_evidence(repo, lead)
+    repo.upsert_dossier(
+        Dossier(lead_id=lead.lead_id, username=lead.username, status=AI_STATUS_NEEDS_REVIEW, summary="s")
     )
-    worker_stores.jobs.enqueue("ai_outreach", lead.lead_id, lead.username, lead.username_normalized)
-    job = worker_stores.jobs.claim_next(worker_id="w1")
-
     provider = FakeAIProvider(outreach=OutreachDraft(emailSubject="Hi", emailBody="b", dmBody="d"))
-    stage = _outreach_stage(worker_stores, provider)
-    stage.run(job)
-    stage.run(job)
-
+    stage = _outreach_stage(provider)
+    stage.run(job, repo)
+    stage.run(job, repo)
     assert provider.calls == 1
-    assert len(worker_stores.outreach.read_rows(KEY_OUTREACH)) == 1
+    assert len(repo.list_outreach()) == 1

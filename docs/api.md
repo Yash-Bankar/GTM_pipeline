@@ -93,8 +93,8 @@ phase. One worker only, and no concurrent job claimer.
 API tests use `fastapi.testclient.TestClient` with the in-memory fake Sheets
 client (no network/credentials) and cover: duplicate submissions, invalid URLs,
 pagination/search/status filters, missing configuration (503), and Sheets error
-mapping (502/503). `POST` against a live sheet can be exercised via
-`scripts/verify_sheets.py --write-test-row`.
+mapping (502/503). A live write can be exercised via
+`scripts/verify_db.py`.
 
 ## Out of scope (Phase 2)
 

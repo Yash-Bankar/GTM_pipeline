@@ -82,7 +82,6 @@ export interface Job {
 
 export interface LeadDetail {
   lead: Lead;
-  enriched: Record<string, string>;
   posts: Post[];
   website_pages: WebsitePage[];
   jobs: Job[];

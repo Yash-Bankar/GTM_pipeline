@@ -40,7 +40,6 @@ def lead_detail(
         )
     return LeadDetailOut(
         lead=LeadResponse.from_lead(detail.lead),
-        enriched=detail.enriched,
         posts=[PostOut.from_model(post) for post in detail.posts],
         website_pages=[WebsitePageOut.from_model(page) for page in detail.website_pages],
         jobs=[JobOut.from_model(job) for job in detail.jobs],

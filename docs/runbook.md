@@ -1,15 +1,13 @@
 # End-to-End Runbook
 
 Step-by-step verification of the complete pipeline, from capture to outreach
-review. Run from the repository root unless noted.
+review, on the PostgreSQL-backed stack. Run from the repository root.
 
 ## 0. Preconditions
 
 - Python 3.14 venv at `backend/.venv`; Node 20.9+ for the frontend; Docker
-  (optional) for the container smoke test.
-- A Google Cloud **service account** with the Sheets API enabled, key saved to
-  `backend/secrets/service-account.json`, and the target spreadsheet shared with
-  the service-account email (Editor).
+  (optional, recommended) for Postgres and the container smoke test.
+- A PostgreSQL 15+ database (local, Docker, or managed).
 - HikerAPI key (profile/media) and, optionally, a Gemini key (AI stages).
 
 ## 1. Configure
@@ -19,8 +17,8 @@ Copy-Item .env.example .env
 Copy-Item frontend/.env.example frontend/.env.local
 ```
 
-Set at minimum in `.env`: `GOOGLE_SHEETS_SPREADSHEET_ID`,
-`GOOGLE_APPLICATION_CREDENTIALS=./backend/secrets/service-account.json`,
+Set at minimum in `.env`:
+`DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/synpo`,
 `HIKERAPI_KEY`, `API_KEY`, and `GEMINI_API_KEY` (or `AI_ENABLED=false`).
 In `frontend/.env.local`: `API_BASE_URL=http://127.0.0.1:8000`,
 `BACKEND_API_KEY=<same as API_KEY>`, `DASHBOARD_PASSWORD=<choose one>`.
@@ -33,22 +31,25 @@ py -3.14 -m venv backend\.venv
 cd frontend; npm install; cd ..
 ```
 
-## 3. Unit tests (fast, no network/credentials)
+## 3. Unit tests (fast; in-memory SQLite, no network)
 
 ```powershell
-.\backend\.venv\Scripts\python.exe -m pytest        # backend: expect all green
-node --test extension/lib.test.js                   # extension helpers
+.\backend\.venv\Scripts\python.exe -m pytest
+node --test extension/lib.test.js
 cd frontend; npm run lint; npx tsc --noEmit; npm run build; cd ..
 ```
 
-## 4. Provision the spreadsheet tabs (idempotent, non-destructive)
+## 4. Apply migrations and verify the database
 
 ```powershell
-.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --create-missing-tabs --extend-headers
+# start Postgres if needed
+docker run --name synpo-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=synpo -p 5432:5432 -d postgres:15-alpine
+
+cd backend; .\.venv\Scripts\python.exe -m alembic upgrade head; cd ..
+.\backend\.venv\Scripts\python.exe scripts\verify_db.py
 ```
 
-Expected: `IG Leads`, `Deduplicated Leads`, `instagram_leads_enriched`,
-`Outreach`, `Pipeline Jobs`, `Lead Posts`, `Website Pages`, `Dossiers` all `[OK]`.
+Expected: `verify_db.py` prints the six tables and `OK`.
 
 Optional provider checks:
 
@@ -77,26 +78,26 @@ Health: `Invoke-RestMethod http://127.0.0.1:8000/health` → `{"status":"ok",...
 - **Extension**: load `extension/` unpacked, set API URL/key, open a profile,
   click **Add to GTM**.
 
-Expected: a new row in `IG Leads` with `status=queued`; a `profile_fetch` job in
-`Pipeline Jobs`; the dashboard shows the lead.
+Expected: a `leads` row with `status=queued`; a `profile_fetch` job in
+`pipeline_jobs`; the dashboard shows the lead.
 
 ## 7. Run the pipeline
 
-The worker (Terminal B) polls and processes automatically. To drive it manually:
+The worker (Terminal B) polls automatically. To drive it manually:
 
 ```powershell
 cd backend; .\.venv\Scripts\python.exe -m app.worker --drain
 ```
 
-Expected progression (worker logs + tabs):
+Expected progression (worker logs + tables):
 
-| Stage | Writes | Lead status |
+| Stage | Writes | Lead fields |
 | --- | --- | --- |
-| `profile_fetch` | `instagram_leads_enriched` | `enriched` (or `not_found`/`error`) |
-| `profile_media` | `Lead Posts` | `mediaStatus` = done/none/error |
-| `website_enrich` | `Website Pages` | `websiteStatus` = done/partial/none/blocked/error |
-| `ai_dossier` | `Dossiers` (`NEEDS_REVIEW`) | — |
-| `ai_outreach` | `Outreach` (`NEEDS_REVIEW`) | — |
+| `profile_fetch` | `leads` profile fields | `status=enriched` (or `not_found`/`error`) |
+| `profile_media` | `lead_posts` | `media_status` = done/none/error |
+| `website_enrich` | `website_pages` | `website_status` = done/partial/none/blocked/error |
+| `ai_dossier` | `dossiers` (`NEEDS_REVIEW`) | — |
+| `ai_outreach` | `outreach_drafts` (`NEEDS_REVIEW`) | — |
 
 ## 8. Review outputs
 
@@ -114,27 +115,31 @@ Expected progression (worker logs + tabs):
 | Duplicate | Add the same handle again (dashboard + extension) | `200 created=false`; "already in the pipeline" |
 | Invalid URL | Submit `https://example.com/x` or `/p/…` | `422` / "Invalid profile" |
 | Auth | Send without / with a wrong `x-api-key` | `401` |
-| Missing website | Lead with no external link | `websiteStatus=none`; pipeline continues |
-| Blocked URL | External link to a private host | `Website Pages` row `status=blocked` |
-| Provider error | Run with an exhausted HikerAPI balance | job → `retry`/`error` with `lastError` |
+| DB down | Stop Postgres, call the API | `503` "Database is unavailable" |
+| Missing website | Lead with no external link | `website_status=none`; pipeline continues |
+| Blocked URL | External link to a private host | `website_pages` row `status=blocked` |
+| Provider error | Run with an exhausted HikerAPI balance | job → `retry`/`error` with `last_error` |
 | Restart recovery | Kill the worker mid-run, restart | stale `running` job returns to `retry` and completes |
 
 ## 10. Container smoke test (optional)
 
 ```powershell
-Copy-Item .env.example .env   # ensure GOOGLE_APPLICATION_CREDENTIALS points at ./backend/secrets
+Copy-Item .env.example .env
 docker compose up --build -d
 Invoke-RestMethod http://127.0.0.1:8000/health
+docker compose exec db psql -U postgres -d synpo -c "\dt"
 docker compose logs -f worker
 docker compose down
 ```
 
-Expected: API healthy, worker logs show job polling with no crashes.
+Expected: Postgres healthy, migrations applied by the API, worker polling with
+no crashes.
 
 ## 11. Definition of done
 
 - [ ] All unit tests green; frontend builds.
+- [ ] Migrations apply cleanly; `verify_db.py` reports `OK`.
 - [ ] A submitted lead reaches `enriched` with posts/website evidence recorded.
 - [ ] Dossiers and Outreach rows exist as `NEEDS_REVIEW` (when AI enabled).
-- [ ] Duplicate, invalid, and auth paths behave as above.
+- [ ] Duplicate, invalid, auth, and DB-down paths behave as above.
 - [ ] No secrets committed; `.env` files gitignored.

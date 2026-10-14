@@ -1,8 +1,8 @@
-"""Autonomous worker: poll `Pipeline Jobs`, claim one, execute, repeat.
+"""Autonomous worker: poll `pipeline_jobs`, claim one, execute, repeat.
 
-Single-instance by design (spreadsheet-backed MVP): one worker claims jobs under
-a shared in-process write lock, so do not run multiple workers or API replicas
-until a Sheets-based lease exists. No external messages are sent.
+Single-instance by design: the queue lives in PostgreSQL. One worker is
+recommended; the DB now provides row-level safety but a cross-process lease is a
+later phase. No external messages are sent.
 
 Run from the `backend` directory so the `app` package resolves:
 
@@ -26,7 +26,8 @@ from app.constants import (
     STAGE_PROFILE_MEDIA,
     STAGE_WEBSITE_ENRICH,
 )
-from app.dependencies import SheetStores, build_sheet_stores
+from app.db.database import get_session_factory
+from app.db.repository import Repository
 from app.providers import HikerAPIClient
 from app.providers.ai import GeminiProvider
 from app.providers.website import WebsiteCrawler
@@ -42,18 +43,17 @@ from app.worker.pipeline import (
 
 logger = logging.getLogger("synpo.worker")
 
-# Never poll faster than this, even if configured lower, so an idle worker does
-# not burn the Google Sheets quota (~60 requests/min) just by polling.
+# Never poll faster than this, even if configured lower.
 MIN_POLL_INTERVAL_SECONDS = 5.0
 
 
 class Worker:
-    """Single-threaded job runner."""
+    """Single-threaded job runner over a PostgreSQL session factory."""
 
     def __init__(
         self,
         *,
-        job_store: object,
+        session_factory,
         stages: dict[str, Stage],
         worker_id: str = "worker-1",
         poll_interval: float = 30.0,
@@ -61,7 +61,7 @@ class Worker:
         retry_backoff_base: float = 60.0,
         retry_backoff_max: float = 3600.0,
     ) -> None:
-        self._job_store = job_store
+        self._session_factory = session_factory
         self._stages = dict(stages)
         self._worker_id = worker_id
         self._poll_interval = max(MIN_POLL_INTERVAL_SECONDS, float(poll_interval))
@@ -71,7 +71,8 @@ class Worker:
 
     def recover(self) -> int:
         """Return interrupted `running` jobs to `retry` (restart recovery)."""
-        recovered = self._job_store.recover_stale_jobs(self._stale_minutes)
+        with self._session_factory() as session:
+            recovered = Repository(session).recover_stale_jobs(self._stale_minutes)
         if recovered:
             logger.info("Recovered %s stale job(s) from a previous run", recovered)
         return recovered
@@ -92,7 +93,8 @@ class Worker:
             if max_jobs is not None and processed >= max_jobs:
                 break
 
-            job = self._job_store.claim_next(worker_id=self._worker_id)
+            with self._session_factory() as session:
+                job = Repository(session).claim_next(worker_id=self._worker_id)
             if job is None:
                 if drain or max_jobs is not None:
                     break
@@ -106,38 +108,40 @@ class Worker:
         return processed
 
     def run_job(self, job) -> StageOutcome:
-        stage = self._stages.get(job.stage)
-        if stage is None:
-            outcome = StageOutcome(
-                ok=False, error=f"no stage registered for '{job.stage}'", retryable=False
-            )
-        else:
-            try:
-                outcome = stage.run(job)
-            except Exception as exc:  # noqa: BLE001 - surfaced as a job error
-                logger.exception("Job %s crashed", job.job_id)
+        with self._session_factory() as session:
+            repo = Repository(session)
+            stage = self._stages.get(job.stage)
+            if stage is None:
                 outcome = StageOutcome(
-                    ok=False, error=f"{type(exc).__name__}: {exc}"[:1000], retryable=True
+                    ok=False, error=f"no stage registered for '{job.stage}'", retryable=False
                 )
+            else:
+                try:
+                    outcome = stage.run(job, repo)
+                except Exception as exc:  # noqa: BLE001 - surfaced as a job error
+                    logger.exception("Job %s crashed", job.job_id)
+                    outcome = StageOutcome(
+                        ok=False, error=f"{type(exc).__name__}: {exc}"[:1000], retryable=True
+                    )
 
-        if outcome.ok:
-            self._job_store.complete(job, outcome.result)
-            logger.info("Job %s (%s) done", job.job_id, job.stage)
-        else:
-            status = self._job_store.fail(
-                job,
-                outcome.error,
-                retryable=outcome.retryable,
-                backoff_base=self._retry_backoff_base,
-                backoff_max=self._retry_backoff_max,
-            )
-            logger.warning(
-                "Job %s (%s) -> %s: %s", job.job_id, job.stage, status, outcome.error
-            )
-        return outcome
+            if outcome.ok:
+                repo.complete(job, outcome.result)
+                logger.info("Job %s (%s) done", job.job_id, job.stage)
+            else:
+                status = repo.fail(
+                    job,
+                    outcome.error,
+                    retryable=outcome.retryable,
+                    backoff_base=self._retry_backoff_base,
+                    backoff_max=self._retry_backoff_max,
+                )
+                logger.warning(
+                    "Job %s (%s) -> %s: %s", job.job_id, job.stage, status, outcome.error
+                )
+            return outcome
 
 
-def build_stages(stores: SheetStores, settings: Settings) -> dict[str, Stage]:
+def build_stages(settings: Settings) -> dict[str, Stage]:
     hiker = HikerAPIClient.from_settings(settings)
     crawler = WebsiteCrawler(
         timeout=settings.website_timeout_seconds,
@@ -154,25 +158,15 @@ def build_stages(stores: SheetStores, settings: Settings) -> dict[str, Stage]:
     stages: dict[str, Stage] = {
         STAGE_PROFILE_FETCH: ProfileFetchStage(
             hiker,
-            stores.lead_store,
-            stores.enriched_store,
-            job_store=stores.job_store,
             followup_max_attempts=settings.pipeline_max_attempts,
             enable_ai=ai_enabled,
         ),
         STAGE_PROFILE_MEDIA: ProfileMediaStage(
             hiker,
-            stores.lead_store,
-            stores.post_store,
             max_posts=settings.media_max_posts,
             max_pages=settings.media_max_pages,
         ),
-        STAGE_WEBSITE_ENRICH: WebsiteEnrichStage(
-            crawler,
-            stores.lead_store,
-            stores.website_store,
-            enriched_store=stores.enriched_store,
-        ),
+        STAGE_WEBSITE_ENRICH: WebsiteEnrichStage(crawler),
     }
 
     if ai_enabled:
@@ -185,22 +179,12 @@ def build_stages(stores: SheetStores, settings: Settings) -> dict[str, Stage]:
         }
         stages[STAGE_AI_DOSSIER] = AIDossierStage(
             service,
-            stores.lead_store,
-            stores.post_store,
-            stores.website_store,
-            stores.dossier_store,
             model_name=settings.gemini_model,
-            job_store=stores.job_store,
             followup_max_attempts=settings.pipeline_max_attempts,
             **evidence_kwargs,
         )
         stages[STAGE_AI_OUTREACH] = AIOutreachStage(
             service,
-            stores.lead_store,
-            stores.post_store,
-            stores.website_store,
-            stores.dossier_store,
-            stores.outreach_store,
             model_name=settings.gemini_model,
             **evidence_kwargs,
         )
@@ -233,10 +217,9 @@ def main() -> int:
         logger.error("HIKERAPI_KEY is not set (see .env.example).")
         return 2
 
-    stores = build_sheet_stores(settings)
     worker = Worker(
-        job_store=stores.job_store,
-        stages=build_stages(stores, settings),
+        session_factory=get_session_factory(),
+        stages=build_stages(settings),
         worker_id=args.worker_id,
         poll_interval=args.poll_interval if args.poll_interval is not None else settings.worker_poll_interval,
         stale_minutes=args.stale_minutes if args.stale_minutes is not None else settings.worker_stale_minutes,
@@ -254,7 +237,7 @@ def main() -> int:
     try:
         signal.signal(signal.SIGTERM, _handle_signal)
     except (AttributeError, ValueError):
-        pass  # not available on all platforms
+        pass
 
     max_jobs = 1 if args.once else args.max_jobs
     processed = worker.run(max_jobs=max_jobs, drain=args.drain, stop_event=stop)

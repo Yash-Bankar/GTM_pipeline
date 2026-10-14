@@ -9,133 +9,132 @@ runtime processes plus two static/browser artifacts:
 | Worker | background pipeline (`app.worker`) | same image, different command |
 | Dashboard | Next.js App Router | `frontend/` |
 | Extension | Chrome MV3 capture | `extension/` |
-| Data | Google Sheets (source of truth) | external; **no database** |
-
-> Phase 9 (data migration) was intentionally skipped — the system has no database
-> to migrate.
+| Data | **PostgreSQL** (source of truth) | `db` service / managed Postgres |
 
 ## 1. Topology
 
 ```text
-Browser/Extension ──HTTPS──▶ API (FastAPI) ──▶ Google Sheets
-                                   ▲                 ▲
-                                   │                 │
-                            Worker (1 instance) ─────┘
+Browser/Extension ──HTTPS──▶ API (FastAPI) ──SQL──▶ PostgreSQL
+                                   ▲                    ▲
+                                   │                    │
+                            Worker (1 instance) ────────┘
 Dashboard (Next.js server) ──HTTP──▶ API
 ```
 
-**Hard constraints**
-- **Exactly one worker instance** and **one API writer**: job state lives in
-  Sheets with an in-process lock; there is no cross-process lease yet. Scale
-  reads only.
-- Google Sheets API quotas apply; keep `GOOGLE_SHEETS_MAX_ATTEMPTS` and worker
-  polling sane.
-- The browser/extension never talks to Google Sheets or providers directly.
+**Constraints**
+- Schema is managed by **Alembic**; the API runs `alembic upgrade head` on start.
+- Keep **one worker instance** for now (a database-based lease is a later phase).
+- The browser/extension never talk to PostgreSQL or providers directly.
 
 ## 2. Configuration
 
 Two env files, both with committed examples:
 
-- Backend + worker: repo-root **`.env`** — see **`.env.example`**.
+- Backend + worker: repo-root **`.env`** — see **`.env.example`** (and the
+  mirrored `backend/.env.example`).
 - Dashboard: **`frontend/.env.local`** — see **`frontend/.env.example`**.
-
-Copy and fill:
 
 ```powershell
 Copy-Item .env.example .env
 Copy-Item frontend/.env.example frontend/.env.local
 ```
 
-### Required for a working pipeline
+### Required
 
 | Variable | File | Notes |
 | --- | --- | --- |
-| `GOOGLE_SHEETS_SPREADSHEET_ID` | `.env` | target spreadsheet id |
-| `GOOGLE_APPLICATION_CREDENTIALS` | `.env` | path to service-account JSON |
+| `DATABASE_URL` | `.env` | sync SQLAlchemy URL (see below) |
 | `HIKERAPI_KEY` | `.env` | profile/media enrichment |
-| `GEMINI_API_KEY` | `.env` | dossiers + outreach (optional: `AI_ENABLED=false` to skip) |
+| `GEMINI_API_KEY` | `.env` | dossiers + outreach (or `AI_ENABLED=false`) |
 | `API_KEY` | `.env` | if set, API requires `x-api-key` |
 | `BACKEND_API_KEY` | `frontend/.env.local` | must equal `API_KEY` |
 | `API_BASE_URL` | `frontend/.env.local` | server-side API URL |
-| `DASHBOARD_PASSWORD` | `frontend/.env.local` | enables the login gate (unset = open) |
+| `DASHBOARD_PASSWORD` | `frontend/.env.local` | enables the login gate |
 | `SESSION_SECRET` | `frontend/.env.local` | optional cookie HMAC secret |
 | API URL + key | extension popup settings | stored in `chrome.storage.local` |
 
+### `DATABASE_URL` formats
+
+```text
+# local dev / tests
+postgresql+psycopg2://postgres:postgres@localhost:5432/synpo
+# inside docker compose (service name `db`)
+postgresql+psycopg2://postgres:postgres@db:5432/synpo
+# managed Postgres
+postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
+```
+
 ### Secrets (never commit)
 
-- `backend/secrets/service-account.json` — Google service account key
-  (gitignored). Share the spreadsheet with the service-account email as Editor.
+- Database credentials live in `DATABASE_URL` (gitignored `.env`); prefer a
+  secrets manager in production.
 - All `.env*` files are gitignored; `.env.example` files contain placeholders only.
-- Prefer a secrets manager in production (see §5/§6) rather than a checked-in file.
 
 ## 3. Run locally (Docker Compose)
 
 ```powershell
 Copy-Item .env.example .env
-# put the service-account JSON at backend/secrets/service-account.json
-docker compose up --build            # API + worker
+docker compose up --build            # postgres + API + worker
 docker compose --profile frontend up # + dashboard on http://localhost:3000
 ```
 
-- API: http://localhost:8000 (`/health`, `/docs`).
+- Postgres: `postgres:15-alpine`, volume `postgres_data`, healthcheck `pg_isready`.
+- The API waits for Postgres to be healthy, runs `alembic upgrade head`, then
+  serves on http://localhost:8000 (`/health`, `/docs`).
 - The worker reuses the same image with `command: python -m app.worker`.
-- The service-account JSON is mounted **read-only** at `/app/secrets`.
 - Containers run **non-root**, `read_only`, `cap_drop: ALL`, `no-new-privileges`.
 
 Useful commands:
 
 ```powershell
 docker compose logs -f api worker
-docker compose ps
-docker compose restart worker
-docker compose down
+docker compose exec api alembic upgrade head     # run migrations manually
+docker compose exec db psql -U postgres -d synpo -c "\dt"
+docker compose down                              # keep the volume
+docker compose down -v                           # also delete data
 ```
 
 ## 4. Run locally (no Docker, dev)
 
 ```powershell
-# API
+# 1. start Postgres (local install or a container)
+docker run --name synpo-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=synpo -p 5432:5432 -d postgres:15-alpine
+# 2. apply migrations
+cd backend; .\.venv\Scripts\python.exe -m alembic upgrade head; cd ..
+# 3. run the processes
 cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
-# Worker (separate terminal)
 cd backend; .\.venv\Scripts\python.exe -m app.worker
-# Dashboard (separate terminal)
 cd frontend; npm run dev
 ```
 
+Verify: `.\backend\.venv\Scripts\python.exe scripts\verify_db.py`.
+
 ## 5. Production — backend + worker
 
-1. **Build & push the image**
+1. **Provision Postgres** (managed service recommended) and set `DATABASE_URL`
+   with `sslmode=require`.
+2. **Build & push the image**
 
    ```bash
    docker build -t registry.example.com/synpo-gtm-backend:1.0.0 .
    docker push registry.example.com/synpo-gtm-backend:1.0.0
    ```
 
-2. **Provide config as secrets**, not files:
-   - Env vars from a secret manager (AWS Secrets Manager / GCP Secret Manager /
-     Vault / K8s Secret).
-   - The service-account JSON mounted as a read-only secret volume.
-
-3. **Run two workloads from the same image**:
-   - API: `python -m uvicorn app.main:app --host 0.0.0.0 --port 8000`
-     (`replicas: 1` for the MVP).
+3. **Migrations**: run `alembic upgrade head` as a release step (the API also
+   runs it on start). For zero-downtime, run migrations before rolling the API.
+4. **Run two workloads from the same image**:
+   - API: `uvicorn app.main:app --host 0.0.0.0 --port 8000` (`replicas: 1` for now).
    - Worker: `python -m app.worker` (`replicas: 1`, `strategy: Recreate`).
-
-4. **TLS + reverse proxy** (nginx/Caddy/Traefik) in front of the API. Set
-   `CORS_ALLOW_ORIGINS` to your dashboard origin(s) (and `chrome-extension://…`
-   if you ship the extension).
-
-5. **Health**: the API exposes `GET /health`; wire it to your load balancer and
-   container orchestrator. The worker has no HTTP surface — monitor logs and the
-   `Pipeline Jobs` tab.
+5. **TLS + reverse proxy** (nginx/Caddy/Traefik) in front of the API. Set
+   `CORS_ALLOW_ORIGINS` to your dashboard origin(s) and `chrome-extension://…`.
+6. **Health**: the API exposes `GET /health`; wire it to your load balancer.
+   The worker has no HTTP surface — monitor logs and the `pipeline_jobs` table.
 
 ## 6. Production — dashboard (Next.js)
 
-The dashboard is a standard Next.js app. Options:
-
-- **Vercel (simplest)**: import `frontend/`, set env (`API_BASE_URL`,
-  `BACKEND_API_KEY`, `DASHBOARD_PASSWORD`, `SESSION_SECRET`), deploy.
-- **Node server / container**: build the included image and run it.
+- **Vercel**: import `frontend/`, set env (`API_BASE_URL`, `BACKEND_API_KEY`,
+  `DASHBOARD_PASSWORD`, `SESSION_SECRET`), deploy.
+- **Container**:
 
   ```bash
   docker build -t registry.example.com/synpo-gtm-frontend:1.0.0 ./frontend
@@ -144,15 +143,10 @@ The dashboard is a standard Next.js app. Options:
     registry.example.com/synpo-gtm-frontend:1.0.0
   ```
 
-- Put it behind TLS and set `API_BASE_URL` to the public API URL.
-
-> The dashboard talks to the API **server-side only**; `BACKEND_API_KEY` is never
-> sent to the browser. Do not add `NEXT_PUBLIC_` secrets.
+The dashboard talks to the API **server-side only**; `BACKEND_API_KEY` is never
+sent to the browser. Do not add `NEXT_PUBLIC_` secrets.
 
 ## 7. Kubernetes (sketch)
-
-A minimal, single-replica layout. Store env + the service-account JSON in a
-Secret; the JSON is mounted read-only.
 
 ```yaml
 apiVersion: v1
@@ -160,26 +154,17 @@ kind: Secret
 metadata: { name: synpo-gtm-env }
 type: Opaque
 stringData:
-  GOOGLE_SHEETS_SPREADSHEET_ID: "REPLACE"
+  DATABASE_URL: "postgresql+psycopg2://user:pass@db-host:5432/synpo?sslmode=require"
   HIKERAPI_KEY: "REPLACE"
   GEMINI_API_KEY: "REPLACE"
   API_KEY: "REPLACE"
   CORS_ALLOW_ORIGINS: "https://dashboard.example.com"
-  GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/service-account.json
----
-apiVersion: v1
-kind: Secret
-metadata: { name: synpo-gtm-sa }
-type: Opaque
-stringData:
-  service-account.json: |
-    { "type": "service_account", "...": "REPLACE" }
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: synpo-gtm-api }
 spec:
-  replicas: 1                      # single writer
+  replicas: 1
   selector: { matchLabels: { app: synpo-gtm-api } }
   template:
     metadata: { labels: { app: synpo-gtm-api } }
@@ -190,14 +175,9 @@ spec:
           image: registry.example.com/synpo-gtm-backend:1.0.0
           ports: [{ containerPort: 8000 }]
           envFrom: [{ secretRef: { name: synpo-gtm-env } }]
-          volumeMounts:
-            - { name: sa, mountPath: /var/secrets/google, readOnly: true }
-          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 10 }
-          livenessProbe:  { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 20 }
+          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 15 }
+          livenessProbe:  { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 30 }
           securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
-      volumes:
-        - name: sa
-          secret: { secretName: synpo-gtm-sa }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -215,12 +195,7 @@ spec:
           image: registry.example.com/synpo-gtm-backend:1.0.0
           command: ["python", "-m", "app.worker"]
           envFrom: [{ secretRef: { name: synpo-gtm-env } }]
-          volumeMounts:
-            - { name: sa, mountPath: /var/secrets/google, readOnly: true }
           securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
-      volumes:
-        - name: sa
-          secret: { secretName: synpo-gtm-sa }
 ---
 apiVersion: v1
 kind: Service
@@ -245,20 +220,17 @@ spec:
             backend: { service: { name: synpo-gtm-api, port: { number: 80 } } }
 ```
 
-Notes:
-- Set `GOOGLE_APPLICATION_CREDENTIALS` to the mounted path (`/var/secrets/google/...`).
-- Keep `replicas: 1` for both API and worker until a Sheets-based lease exists
-  (later phase). Scale the **dashboard** freely.
-- Consider a `NetworkPolicy` restricting egress to Google APIs + HikerAPI + Gemini.
+Run migrations as an init container or a `Job` before rolling out the API.
 
 ## 8. Security checklist
 
 - [ ] No secrets in git or images (`.dockerignore`, `.gitignore`).
+- [ ] Postgres reachable only from the app network; TLS (`sslmode=require`) in prod.
 - [ ] Containers non-root, read-only root FS, capabilities dropped.
 - [ ] `API_KEY` set; dashboard `BACKEND_API_KEY` matches; extension key matches.
 - [ ] `CORS_ALLOW_ORIGINS` restricted to real origins in production.
 - [ ] `DASHBOARD_PASSWORD` set; `SESSION_SECRET` unique per environment.
-- [ ] TLS everywhere; spreadsheet shared only with the service account.
+- [ ] Backups + point-in-time recovery configured for Postgres.
 - [ ] `AI_ENABLED=false` if Gemini is not desired.
 - [ ] One worker replica.
 
@@ -266,15 +238,14 @@ Notes:
 
 | Symptom | Likely cause / fix |
 | --- | --- |
-| API 503 "storage is not configured" | missing `GOOGLE_SHEETS_SPREADSHEET_ID` / credentials |
+| API 503 "Database is unavailable" | wrong `DATABASE_URL`, DB not running, or network/firewall |
+| `relation "leads" does not exist` | migrations not applied — `alembic upgrade head` |
 | API 401 | `API_KEY` set but caller didn't send `x-api-key` |
-| Sheets 403 | spreadsheet not shared with the service-account email |
-| Repeated Sheets 429 | back off: keep `GOOGLE_SHEETS_LAYOUT_CACHE_TTL_SECONDS` > 0, raise `WORKER_POLL_INTERVAL`, increase `GOOGLE_SHEETS_QUOTA_BACKOFF_*` |
-| Worker does nothing | no eligible jobs, or `HIKERAPI_KEY` unset, or wrong `Pipeline Jobs` tab name |
+| Worker does nothing | no eligible jobs, or `HIKERAPI_KEY` unset |
 | Dossiers/outreach never appear | `AI_ENABLED=false` or `GEMINI_API_KEY` unset |
 | Gemini 404 | retired model — pick a current one (see `docs/gemini.md`) |
 | HikerAPI 402 | account has no balance/credits |
 
-See also: [dashboard.md](dashboard.md), [worker.md](worker.md),
-[gemini.md](gemini.md), [website-enrichment.md](website-enrichment.md),
+See also: [database.md](database.md), [dashboard.md](dashboard.md),
+[worker.md](worker.md), [gemini.md](gemini.md),
 [../extension/README.md](../extension/README.md).

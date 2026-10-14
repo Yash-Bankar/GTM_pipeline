@@ -15,7 +15,9 @@ backend/
 │  ├─ common/      Shared helpers (retry)
 │  ├─ leads/       Lead API (Phase 2)
 │  ├─ providers/   HikerAPI provider (Phase 3)
-│  └─ sheets/      Google Sheets storage layer (Phase 1)
+│  └─ db/          PostgreSQL storage layer (Phase 11)
+├─ alembic/        Database migrations
+├─ alembic.ini
 ├─ requirements.txt
 └─ .venv/          local virtual environment (gitignored)
 ```
@@ -42,21 +44,27 @@ Health check: `Invoke-RestMethod http://127.0.0.1:8000/health`
 .\.venv\Scripts\python.exe -m app.worker --drain
 ```
 
+## Migrations
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
 ## Tests
 
-Run from the repository root (uses `pytest.ini`):
+Run from the repository root (uses `pytest.ini`); tests use in-memory SQLite:
 
 ```powershell
 .\backend\.venv\Scripts\python.exe -m pytest
 ```
 
-Storage integration check (requires `.env` + `secrets/service-account.json`):
+Database check (requires `DATABASE_URL` and applied migrations):
 
 ```powershell
-.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --check-only
+.\backend\.venv\Scripts\python.exe scripts\verify_db.py
 ```
 
-See [../docs/sheets-contract.md](../docs/sheets-contract.md) for the Sheets setup.
+See [../docs/database.md](../docs/database.md) for the schema and contracts.
 
 Configuration is read from environment variables (see the repo-root
 `.env.example`). No secrets belong in this directory.

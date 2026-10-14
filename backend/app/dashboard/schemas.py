@@ -7,7 +7,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.leads.schemas import LeadResponse
-from app.sheets.models import (
+from app.db.schemas import (
     Dossier,
     LeadPost,
     OutreachEntry,
@@ -174,7 +174,6 @@ class OutreachOut(BaseModel):
 
 class LeadDetailOut(BaseModel):
     lead: LeadResponse
-    enriched: dict[str, str] = Field(default_factory=dict)
     posts: list[PostOut] = Field(default_factory=list)
     website_pages: list[WebsitePageOut] = Field(default_factory=list)
     jobs: list[JobOut] = Field(default_factory=list)

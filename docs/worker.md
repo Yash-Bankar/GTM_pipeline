@@ -1,8 +1,8 @@
 # Autonomous Worker (Phase 4)
 
-`backend/app/worker/` polls the **`Pipeline Jobs`** tab, claims one eligible job,
-runs its stage, persists progress, and repeats. It sends **no external
-messages** — only Google Sheets reads/writes and (for now) HikerAPI profile
+`backend/app/worker/` polls the **`pipeline_jobs`** table, claims one eligible
+job, runs its stage, persists progress, and repeats. It sends **no external
+messages** — only PostgreSQL reads/writes and (for now) HikerAPI profile
 fetches.
 
 ```text
@@ -17,11 +17,11 @@ backend/app/worker/
 
 | Stage | What it does | Writes | Idempotency key |
 | --- | --- | --- | --- |
-| `profile_fetch` | HikerAPI profile → enriched row; enqueues the optional follow-ups | `instagram_leads_enriched`, `IG Leads` | `leadId` |
-| `profile_media` | bounded recent posts/reels | `Lead Posts`, lead `mediaStatus` | `postId` |
-| `website_enrich` | SSRF-safe crawl of external links | `Website Pages`, lead `websiteStatus` | `pageId` |
-| `ai_dossier` | Gemini dossier + qualification score | `Dossiers` | `leadId` |
-| `ai_outreach` | Gemini email/DM drafts (`NEEDS_REVIEW`) | `Outreach` | `leadId` |
+| `profile_fetch` | HikerAPI profile → lead fields; enqueues the optional follow-ups | `leads` | `lead_id` |
+| `profile_media` | bounded recent posts/reels | `lead_posts`, lead `media_status` | `post_id` |
+| `website_enrich` | SSRF-safe crawl of external links | `website_pages`, lead `website_status` | `page_id` |
+| `ai_dossier` | Gemini dossier + qualification score | `dossiers` | `lead_id` |
+| `ai_outreach` | Gemini email/DM drafts (`NEEDS_REVIEW`) | `outreach_drafts` | `lead_id` |
 
 `profile_fetch` enqueues `profile_media` (when an Instagram id is known) and
 `website_enrich` (when the profile has links). The media/website stages are
@@ -34,23 +34,19 @@ evidence is gathered first), and `ai_dossier` enqueues `ai_outreach`. Both are
 idempotent and store `NEEDS_REVIEW` outputs; nothing is sent. See
 [gemini.md](gemini.md).
 
-## `Pipeline Jobs` tab
+## `pipeline_jobs` table
 
-Header row (contract):
+Columns: `job_id` (PK), `stage`, `lead_id`, `username`, `username_normalized`,
+`status`, `attempt_count`, `max_attempts`, `priority`, `payload`, `result`,
+`last_error`, `locked_at`, `locked_by`, `run_after`, `created_at`, `updated_at`.
 
-```text
-jobId, stage, leadId, username, usernameNormalized, status, attemptCount,
-maxAttempts, priority, payload, result, lastError, lockedAt, lockedBy, runAfter,
-createdAt, updatedAt
-```
-
-- `jobId` — stable key (`job_<uuid hex>`).
-- `(stage, leadId)` — logical idempotency key; `enqueue` skips duplicates.
+- `job_id` — stable key (`job_<uuid hex>`).
+- `(stage, lead_id)` — **unique** idempotency key; `enqueue` skips duplicates.
 - `status` — `queued` → `running` → `done` | `retry` | `error`.
-- `attemptCount` — incremented on claim; retries stop at `maxAttempts`.
-- `runAfter` — earliest time a `queued`/`retry` job may be claimed (backoff).
-- `lockedAt`/`lockedBy` — set while running; used for restart recovery.
-- `lastError` / `result` — stored error details and a short success summary.
+- `attempt_count` — incremented on claim; retries stop at `max_attempts`.
+- `run_after` — earliest time a `queued`/`retry` job may be claimed (backoff).
+- `locked_at`/`locked_by` — set while running; used for restart recovery.
+- `last_error` / `result` — stored error details and a short success summary.
 
 ## Lifecycle
 
@@ -58,10 +54,10 @@ createdAt, updatedAt
 2. The worker claims the highest-priority eligible job (`queued`/`retry` with
    `runAfter` in the past), setting it `running` and incrementing `attemptCount`.
 3. The stage runs:
-   - **success** → job `done`; enriched row upserted (by `leadId`) and the IG
-     Leads row updated to `enriched`.
+   - **success** → job `done`; the `leads` row is updated (profile fields,
+     `status=enriched`).
    - **retryable error** (rate limit, quota, network, bad payload) → job `retry`
-     with exponential `runAfter`, until `maxAttempts` is reached, then `error`.
+     with exponential `run_after`, until `max_attempts` is reached, then `error`.
    - **terminal error** (not found, auth/config, invalid input) → job `error`.
 4. The worker continues until no work remains (or is stopped).
 
@@ -69,18 +65,17 @@ createdAt, updatedAt
 
 - **Bounded API calls + retries**: HikerAPI timeouts/backoff (Phase 3); job-level
   retries with exponential backoff.
-- **Idempotent stages**: enriched rows are upserted by `leadId` (`createdAt`
-  preserved); re-running a job does not duplicate rows.
-- **Batch, serialized writes**: status transitions are single `batchUpdate`
-  calls; all stores share one client and one in-process write lock.
+- **Idempotent stages**: posts/pages/dossiers/outreach are upserted by primary
+  key (`created_at` preserved); re-running a job does not duplicate rows.
+- **Serialized writes**: each job runs in its own DB session/transaction.
 - **Restart recovery**: `recover_stale_jobs` returns `running` jobs whose
-  `lockedAt` is older than `WORKER_STALE_MINUTES` to `retry`.
+  `locked_at` is older than `WORKER_STALE_MINUTES` to `retry`.
 - **Graceful shutdown**: `SIGINT`/`SIGTERM` set a stop event; the in-flight job
   finishes, then the worker exits.
 
 ## Single instance only (MVP)
 
-Run exactly **one** worker and **one** API instance. Job state lives in Sheets
+Run exactly **one** worker and **one** API instance. Job state lives in Postgres
 and there is no cross-process lease; multiple writers could double-claim. A
 Sheets-based lease is a later phase.
 
@@ -113,12 +108,9 @@ cd backend
 ## Configuration
 
 See `.env.example`: `WORKER_POLL_INTERVAL` (seconds; a hard **minimum of 5s** is
-enforced so an idle worker does not burn the Sheets quota by polling),
-`WORKER_STALE_MINUTES`, `PIPELINE_MAX_ATTEMPTS`,
-`PIPELINE_RETRY_BACKOFF_BASE_SECONDS`, `PIPELINE_RETRY_BACKOFF_MAX_SECONDS`,
-`GOOGLE_SHEETS_JOBS_TAB`, and the Sheets cache/quota settings
-(`GOOGLE_SHEETS_LAYOUT_CACHE_TTL_SECONDS`,
-`GOOGLE_SHEETS_QUOTA_BACKOFF_BASE_SECONDS`, `GOOGLE_SHEETS_QUOTA_BACKOFF_MAX_SECONDS`).
+enforced so an idle worker does not spin), `WORKER_STALE_MINUTES`,
+`PIPELINE_MAX_ATTEMPTS`, `PIPELINE_RETRY_BACKOFF_BASE_SECONDS`,
+`PIPELINE_RETRY_BACKOFF_MAX_SECONDS`, and `DATABASE_URL`.
 
 ## Tests
 

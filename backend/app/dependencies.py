@@ -1,95 +1,32 @@
-"""FastAPI dependency providers and shared store wiring.
+"""FastAPI dependency providers (database-backed).
 
-All stores share **one** `GoogleSheetsClient` and **one** in-process write lock,
-so writes are serialized. The MVP supports exactly one backend instance and one
-worker: do not run multiple API replicas or a separate writer process, or Sheets
-writes can race. A Sheets-based lease is a later phase.
+A SQLAlchemy session is created per request and wrapped in a `Repository`. The
+MVP still assumes a single writer (one API instance + one worker); the database
+now provides real concurrency safety at the row level.
 """
 
 from __future__ import annotations
 
-import threading
-from dataclasses import dataclass
-from functools import lru_cache
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
 
-from fastapi import Header, HTTPException, status
-
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.dashboard.service import DashboardService
+from app.db.database import get_db
+from app.db.repository import Repository
 from app.leads.service import LeadService
-from app.sheets.client import GoogleSheetsClient
-from app.sheets.repository import (
-    JobStore,
-    LeadStore,
-    SheetStore,
-    tab_names_from_settings,
-)
 
 
-@dataclass(frozen=True)
-class SheetStores:
-    """The shared spreadsheet client and every repository built on it."""
-
-    client: GoogleSheetsClient
-    lock: threading.RLock
-    tab_names: dict[str, str]
-    lead_store: LeadStore
-    job_store: JobStore
-    enriched_store: SheetStore
-    outreach_store: SheetStore
-    post_store: SheetStore
-    website_store: SheetStore
-    dossier_store: SheetStore
+def get_repository(db: Session = Depends(get_db)) -> Repository:
+    return Repository(db)
 
 
-def build_sheet_stores(settings: Settings) -> SheetStores:
-    """Build a fresh bundle (one client, one lock shared by all stores)."""
-    client = GoogleSheetsClient.from_settings(settings)
-    lock = threading.RLock()
-    tab_names = tab_names_from_settings(settings)
-    return SheetStores(
-        client=client,
-        lock=lock,
-        tab_names=tab_names,
-        lead_store=LeadStore(client, tab_names=tab_names, mutation_lock=lock),
-        job_store=JobStore(client, tab_names=tab_names, mutation_lock=lock),
-        enriched_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
-        outreach_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
-        post_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
-        website_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
-        dossier_store=SheetStore(client, tab_names=tab_names, mutation_lock=lock),
-    )
+def get_lead_service(repo: Repository = Depends(get_repository)) -> LeadService:
+    return LeadService(repo)
 
 
-@lru_cache(maxsize=1)
-def get_sheet_stores() -> SheetStores:
-    return build_sheet_stores(get_settings())
-
-
-def get_lead_store() -> LeadStore:
-    return get_sheet_stores().lead_store
-
-
-def get_job_store() -> JobStore:
-    return get_sheet_stores().job_store
-
-
-def get_lead_service() -> LeadService:
-    stores = get_sheet_stores()
-    return LeadService(stores.lead_store, job_store=stores.job_store)
-
-
-def get_dashboard_service() -> DashboardService:
-    stores = get_sheet_stores()
-    return DashboardService(
-        lead_store=stores.lead_store,
-        job_store=stores.job_store,
-        enriched_store=stores.enriched_store,
-        post_store=stores.post_store,
-        website_store=stores.website_store,
-        dossier_store=stores.dossier_store,
-        outreach_store=stores.outreach_store,
-    )
+def get_dashboard_service(repo: Repository = Depends(get_repository)) -> DashboardService:
+    return DashboardService(repo)
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -103,12 +40,9 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 
 
 __all__ = [
-    "SheetStores",
-    "build_sheet_stores",
     "get_dashboard_service",
-    "get_job_store",
+    "get_db",
     "get_lead_service",
-    "get_lead_store",
-    "get_sheet_stores",
+    "get_repository",
     "require_api_key",
 ]

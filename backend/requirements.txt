@@ -19,11 +19,10 @@ requests>=2.34
 # (lxml is optional; the crawler falls back to the stdlib html.parser when absent)
 beautifulsoup4>=4.15
 
-# Google APIs (Sheets: source of truth)
-google-api-python-client>=2.201
-google-auth>=2.61
-google-auth-httplib2>=0.4
-httplib2>=0.22
+# Database (source of truth)
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+alembic>=1.13
 
 # AI generation (Gemini)
 google-genai>=2.29

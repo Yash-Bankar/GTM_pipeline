@@ -1,75 +1,44 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.dashboard.service import DashboardService
-from app.dependencies import get_dashboard_service, get_lead_service
-from app.leads.service import LeadService
-from app.main import app
-from app.sheets.models import Dossier, LeadPost, OutreachEntry, WebsitePage
-from app.sheets.schemas import KEY_DOSSIERS, KEY_OUTREACH, KEY_POSTS, KEY_WEBSITE_PAGES
+from app.db.repository import Repository
+from app.db.schemas import Dossier, LeadPost, OutreachEntry, WebsitePage
 
 
 @pytest.fixture
-def dash_service(worker_stores) -> DashboardService:
-    return DashboardService(
-        lead_store=worker_stores.lead,
-        job_store=worker_stores.jobs,
-        enriched_store=worker_stores.enriched,
-        post_store=worker_stores.posts,
-        website_store=worker_stores.website,
-        dossier_store=worker_stores.dossiers,
-        outreach_store=worker_stores.outreach,
+def seeded(repo: Repository):
+    _, lead = repo.create_or_get_lead("dash.one")
+    repo.enqueue("profile_fetch", lead.lead_id, lead.username, lead.username_normalized)
+    repo.upsert_post(LeadPost(post_id="p1", lead_id=lead.lead_id, caption="cap"))
+    repo.upsert_website_page(
+        WebsitePage(page_id="pg1", lead_id=lead.lead_id, url="https://x.test", title="T", text="txt", status="done")
     )
-
-
-@pytest.fixture
-def seeded(worker_stores):
-    lead = worker_stores.lead.create_lead("dash.one")
-    worker_stores.jobs.enqueue("profile_fetch", lead.lead_id, lead.username, lead.username_normalized)
-    worker_stores.posts.append_model(
-        KEY_POSTS, LeadPost(postId="p1", leadId=lead.lead_id, caption="cap")
-    )
-    worker_stores.website.append_model(
-        KEY_WEBSITE_PAGES,
-        WebsitePage(pageId="pg1", leadId=lead.lead_id, url="https://x.test", title="T", text="txt", status="done"),
-    )
-    worker_stores.dossiers.upsert_model(
-        KEY_DOSSIERS,
+    repo.upsert_dossier(
         Dossier(
-            leadId=lead.lead_id,
+            lead_id=lead.lead_id,
             username=lead.username,
             summary="Finance educator.",
             topics="investing, money",
-            qualificationScore=80,
-            qualificationTier="A",
+            qualification_score=80,
+            qualification_tier="A",
             status="NEEDS_REVIEW",
-            criterionScores='{"finance_relevance": 90}',
-            evidenceUrls="https://x.test",
-        ),
+            criterion_scores='{"finance_relevance": 90}',
+            evidence_urls="https://x.test",
+        )
     )
-    worker_stores.outreach.upsert_model(
-        KEY_OUTREACH,
+    repo.upsert_outreach(
         OutreachEntry(
-            leadId=lead.lead_id, username=lead.username, status="NEEDS_REVIEW",
-            subject="Hi", body="Body", dmBody="DM",
-        ),
+            lead_id=lead.lead_id, username=lead.username, status="NEEDS_REVIEW",
+            subject="Hi", body="Body", dm_body="DM",
+        )
     )
     return lead
 
 
-@pytest.fixture
-def client(dash_service):
-    app.dependency_overrides[get_dashboard_service] = lambda: dash_service
-    with TestClient(app) as test_client:
-        yield test_client
-    app.dependency_overrides.clear()
-
-
-def test_lead_detail(client, seeded) -> None:
-    response = client.get(f"/api/v1/leads/{seeded.lead_id}/detail")
+def test_lead_detail(api_client, seeded) -> None:
+    response = api_client.get(f"/api/v1/leads/{seeded.lead_id}/detail")
     assert response.status_code == 200
     body = response.json()
     assert body["lead"]["lead_id"] == seeded.lead_id
@@ -78,65 +47,55 @@ def test_lead_detail(client, seeded) -> None:
     assert len(body["jobs"]) == 1
 
 
-def test_lead_detail_missing_returns_404(client) -> None:
-    assert client.get("/api/v1/leads/ld_nope/detail").status_code == 404
+def test_lead_detail_missing_returns_404(api_client) -> None:
+    assert api_client.get("/api/v1/leads/ld_nope/detail").status_code == 404
 
 
-def test_retry_lead(client, seeded) -> None:
-    response = client.post(f"/api/v1/leads/{seeded.lead_id}/retry")
+def test_retry_lead(api_client, seeded) -> None:
+    response = api_client.post(f"/api/v1/leads/{seeded.lead_id}/retry")
     assert response.status_code == 200
     assert response.json()["stage"] == "profile_fetch"
 
 
-def test_list_and_get_dossier(client, seeded) -> None:
-    listing = client.get("/api/v1/dossiers").json()
+def test_list_and_get_dossier(api_client, seeded) -> None:
+    listing = api_client.get("/api/v1/dossiers").json()
     assert listing["total"] == 1
     item = listing["items"][0]
     assert item["topics"] == ["investing", "money"]
     assert item["criterion_scores"] == {"finance_relevance": 90}
     assert item["qualification_tier"] == "A"
-
-    single = client.get(f"/api/v1/dossiers/{seeded.lead_id}")
+    single = api_client.get(f"/api/v1/dossiers/{seeded.lead_id}")
     assert single.status_code == 200
     assert single.json()["summary"] == "Finance educator."
 
 
-def test_list_and_patch_outreach(client, seeded) -> None:
-    listing = client.get("/api/v1/outreach").json()
-    assert listing["total"] == 1
-
-    patched = client.patch(
-        f"/api/v1/outreach/{seeded.lead_id}",
-        json={"status": "APPROVED", "body": "edited body"},
+def test_list_and_patch_outreach(api_client, seeded) -> None:
+    assert api_client.get("/api/v1/outreach").json()["total"] == 1
+    patched = api_client.patch(
+        f"/api/v1/outreach/{seeded.lead_id}", json={"status": "APPROVED", "body": "edited body"}
     )
     assert patched.status_code == 200
     assert patched.json()["status"] == "APPROVED"
     assert patched.json()["body"] == "edited body"
 
 
-def test_patch_outreach_invalid_status(client, seeded) -> None:
-    response = client.patch(f"/api/v1/outreach/{seeded.lead_id}", json={"status": "nope"})
-    assert response.status_code == 422
+def test_patch_outreach_invalid_status(api_client, seeded) -> None:
+    assert api_client.patch(f"/api/v1/outreach/{seeded.lead_id}", json={"status": "nope"}).status_code == 422
 
 
-def test_stats(client, seeded) -> None:
-    stats = client.get("/api/v1/stats").json()
+def test_stats(api_client, seeded) -> None:
+    stats = api_client.get("/api/v1/stats").json()
     assert stats["leads_total"] == 1
     assert stats["dossiers_total"] == 1
     assert stats["outreach_needs_review"] == 1
 
 
-def test_api_key_is_enforced(worker_stores, monkeypatch) -> None:
+def test_api_key_is_enforced(api_client, monkeypatch) -> None:
     monkeypatch.setenv("API_KEY", "s3cret")
     get_settings.cache_clear()
-    service = LeadService(worker_stores.lead, job_store=worker_stores.jobs)
-    app.dependency_overrides[get_lead_service] = lambda: service
     try:
-        with TestClient(app) as test_client:
-            assert test_client.get("/api/v1/leads").status_code == 401
-            ok = test_client.get("/api/v1/leads", headers={"x-api-key": "s3cret"})
-            assert ok.status_code == 200
+        assert api_client.get("/api/v1/leads").status_code == 401
+        assert api_client.get("/api/v1/leads", headers={"x-api-key": "s3cret"}).status_code == 200
     finally:
-        app.dependency_overrides.clear()
         monkeypatch.delenv("API_KEY", raising=False)
         get_settings.cache_clear()

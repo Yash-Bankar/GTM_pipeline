@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.sheets.models import Lead
+from app.db.schemas import Lead
 
 from .validation import InvalidLeadInput, parse_lead_input
 

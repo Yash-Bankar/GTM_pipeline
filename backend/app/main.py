@@ -1,8 +1,8 @@
 """FastAPI application entrypoint.
 
 Exposes the lead capture API and maps storage/validation failures to clear HTTP
-statuses. Google Sheets is accessed server-side only; the frontend never talks to
-it directly.
+statuses. PostgreSQL is accessed server-side only; the frontend never talks to it
+directly.
 """
 
 from __future__ import annotations
@@ -10,18 +10,14 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from app import __version__
 from app.config import get_settings
 from app.dashboard.routes import router as dashboard_router
+from app.db.errors import DuplicateLeadError, StorageError
 from app.leads.routes import router as leads_router
 from app.leads.validation import InvalidLeadInput
-from app.sheets.errors import (
-    DuplicateLeadError,
-    SheetsConfigError,
-    SheetsError,
-    SheetsQuotaError,
-)
 
 app = FastAPI(
     title="Synpo GTM Automation API",
@@ -57,21 +53,21 @@ async def _handle_invalid_input(_request: Request, exc: InvalidLeadInput) -> JSO
     return _problem(422, str(exc))
 
 
-@app.exception_handler(SheetsConfigError)
-async def _handle_config_error(_request: Request, exc: SheetsConfigError) -> JSONResponse:
-    return _problem(503, f"Google Sheets storage is not configured: {exc}")
-
-
-@app.exception_handler(SheetsQuotaError)
-async def _handle_quota_error(_request: Request, exc: SheetsQuotaError) -> JSONResponse:
-    return _problem(503, f"Google Sheets is rate limited, retry shortly: {exc}")
-
-
 @app.exception_handler(DuplicateLeadError)
 async def _handle_duplicate(_request: Request, exc: DuplicateLeadError) -> JSONResponse:
     return _problem(409, str(exc))
 
 
-@app.exception_handler(SheetsError)
-async def _handle_sheets_error(_request: Request, exc: SheetsError) -> JSONResponse:
-    return _problem(502, f"Google Sheets error: {exc}")
+@app.exception_handler(OperationalError)
+async def _handle_db_unavailable(_request: Request, exc: OperationalError) -> JSONResponse:
+    return _problem(503, f"Database is unavailable: {exc.orig if hasattr(exc, 'orig') else exc}")
+
+
+@app.exception_handler(StorageError)
+async def _handle_storage_error(_request: Request, exc: StorageError) -> JSONResponse:
+    return _problem(500, f"Storage error: {exc}")
+
+
+@app.exception_handler(SQLAlchemyError)
+async def _handle_sqlalchemy_error(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
+    return _problem(500, f"Database error: {type(exc).__name__}")

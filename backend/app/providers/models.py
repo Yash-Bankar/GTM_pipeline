@@ -118,10 +118,10 @@ def parse_profile_payload(payload: dict[str, Any]) -> HikerProfile:
 
 
 def to_lead_fields(profile: HikerProfile, *, scraped_at: str | None = None) -> dict[str, str]:
-    """Map a normalized profile to the canonical `IG Leads` column names.
+    """Map a normalized profile to `leads` column names (snake_case).
 
-    Keys match the sheet headers so the result can be written by the storage layer
-    (or passed to `Lead`/`EnrichedLead` models) without column-index assumptions.
+    Keys match the database columns so the result can be written directly by the
+    repository.
     """
     all_urls = list(profile.bio_links)
     if profile.external_url and profile.external_url not in all_urls:
@@ -129,18 +129,18 @@ def to_lead_fields(profile: HikerProfile, *, scraped_at: str | None = None) -> d
 
     return {
         "username": profile.username,
-        "fullName": profile.full_name,
-        "instagramId": profile.instagram_id,
-        "followerCount": str(profile.follower_count),
-        "followsCount": str(profile.following_count),
-        "businessCategoryName": profile.category,
+        "full_name": profile.full_name,
+        "instagram_id": profile.instagram_id,
+        "follower_count": str(profile.follower_count),
+        "follows_count": str(profile.following_count),
+        "business_category_name": profile.category,
         "bio": profile.biography,
-        "businessEmail": ",".join(profile.emails),
-        "businessPhoneNumber": profile.phone,
-        "profileUrl": f"https://www.instagram.com/{profile.username}/" if profile.username else "",
-        "externalUrl": profile.external_url,
-        "allExternalUrls": ",".join(all_urls),
-        "scrapedAt": scraped_at or utc_now_iso(),
+        "business_email": ",".join(profile.emails),
+        "business_phone_number": profile.phone,
+        "profile_url": f"https://www.instagram.com/{profile.username}/" if profile.username else "",
+        "external_url": profile.external_url,
+        "all_external_urls": ",".join(all_urls),
+        "scraped_at": scraped_at or utc_now_iso(),
     }
 
 

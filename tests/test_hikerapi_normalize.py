@@ -51,19 +51,19 @@ def test_to_lead_fields_maps_canonical_headers() -> None:
     fields = to_lead_fields(profile, scraped_at="2026-01-01T00:00:00+00:00")
 
     assert fields["username"] == "natgeo"
-    assert fields["fullName"] == "National Geographic"
-    assert fields["instagramId"] == "787132"
-    assert fields["followerCount"] == "274988955"
-    assert fields["followsCount"] == "193"
-    assert fields["businessCategoryName"] == "Media/News Company"
-    assert fields["businessEmail"] == "hello@natgeo.com,partners@natgeo.com"
-    assert fields["businessPhoneNumber"] == "+1 555 0100"
-    assert fields["profileUrl"] == "https://www.instagram.com/natgeo/"
-    assert fields["externalUrl"] == "http://visitstore.bio/natgeo"
-    assert fields["allExternalUrls"] == (
+    assert fields["full_name"] == "National Geographic"
+    assert fields["instagram_id"] == "787132"
+    assert fields["follower_count"] == "274988955"
+    assert fields["follows_count"] == "193"
+    assert fields["business_category_name"] == "Media/News Company"
+    assert fields["business_email"] == "hello@natgeo.com,partners@natgeo.com"
+    assert fields["business_phone_number"] == "+1 555 0100"
+    assert fields["profile_url"] == "https://www.instagram.com/natgeo/"
+    assert fields["external_url"] == "http://visitstore.bio/natgeo"
+    assert fields["all_external_urls"] == (
         "http://visitstore.bio/natgeo,https://natgeo.com/work-with-us"
     )
-    assert fields["scrapedAt"] == "2026-01-01T00:00:00+00:00"
+    assert fields["scraped_at"] == "2026-01-01T00:00:00+00:00"
 
 
 def test_extract_emails_filters_noise() -> None:
@@ -75,4 +75,4 @@ def test_extract_emails_filters_noise() -> None:
 def test_to_lead_fields_without_username_has_empty_profile_url() -> None:
     profile = parse_profile_payload({"username": ""})
     fields = to_lead_fields(profile)
-    assert fields["profileUrl"] == ""
+    assert fields["profile_url"] == ""

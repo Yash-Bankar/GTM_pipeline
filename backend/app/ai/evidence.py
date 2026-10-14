@@ -57,7 +57,7 @@ def build_evidence(
     text_chars: int = 1500,
 ) -> Evidence:
     urls: list[str] = []
-    for raw in (lead_values.get("allExternalUrls", ""), lead_values.get("externalUrl", "")):
+    for raw in (lead_values.get("all_external_urls", ""), lead_values.get("external_url", "")):
         for url in _split_urls(raw):
             if url not in urls:
                 urls.append(url)
@@ -78,19 +78,19 @@ def build_evidence(
     ]
 
     try:
-        followers = int(str(lead_values.get("followerCount", "") or 0))
+        followers = int(str(lead_values.get("follower_count", "") or 0))
     except ValueError:
         followers = 0
 
     return Evidence(
-        lead_id=str(lead_values.get("leadId", "")),
+        lead_id=str(lead_values.get("lead_id", "")),
         username=str(lead_values.get("username", "")),
-        full_name=str(lead_values.get("fullName", "")),
+        full_name=str(lead_values.get("full_name", "")),
         bio=str(lead_values.get("bio", ""))[:text_chars],
-        category=str(lead_values.get("businessCategoryName", "")),
+        category=str(lead_values.get("business_category_name", "")),
         follower_count=followers,
-        business_email=str(lead_values.get("businessEmail", "")),
-        business_phone=str(lead_values.get("businessPhoneNumber", "")),
+        business_email=str(lead_values.get("business_email", "")),
+        business_phone=str(lead_values.get("business_phone_number", "")),
         external_urls=urls,
         posts=posts,
         pages=pages,

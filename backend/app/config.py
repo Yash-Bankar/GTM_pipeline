@@ -13,7 +13,6 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/app/config.py -> parents[0]=app, [1]=backend, [2]=repo root
-BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -58,28 +57,9 @@ class Settings(BaseSettings):
     ai_max_pages_evidence: int = 5
     ai_evidence_text_chars: int = 1500
 
-    # Google Sheets (source of truth)
-    google_sheets_spreadsheet_id: str = ""
-    google_sheets_ig_leads_tab: str = "IG Leads"
-    google_sheets_dedup_tab: str = "Deduplicated Leads"
-    google_sheets_enriched_tab: str = "instagram_leads_enriched"
-    google_sheets_outreach_tab: str = "Outreach"
-    google_sheets_jobs_tab: str = "Pipeline Jobs"
-    google_sheets_posts_tab: str = "Lead Posts"
-    google_sheets_website_pages_tab: str = "Website Pages"
-    google_sheets_dossiers_tab: str = "Dossiers"
-    google_application_credentials: str = ""
-
-    # Google Sheets client behaviour
-    google_sheets_request_timeout_seconds: int = 30
-    google_sheets_max_attempts: int = 5
-    google_sheets_backoff_base_seconds: float = 0.5
-    google_sheets_backoff_max_seconds: float = 30.0
-    # Longer, dedicated backoff for 429 quota/rate-limit errors (10s -> 60s).
-    google_sheets_quota_backoff_base_seconds: float = 10.0
-    google_sheets_quota_backoff_max_seconds: float = 60.0
-    # How long to cache tab titles / header layouts in memory (seconds).
-    google_sheets_layout_cache_ttl_seconds: float = 300.0
+    # Database (source of truth)
+    # Sync SQLAlchemy URL. In Docker the host is the compose service `db`.
+    database_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/synpo"
 
     # Worker
     worker_poll_interval: int = 30
@@ -101,26 +81,6 @@ class Settings(BaseSettings):
     pipeline_max_attempts: int = 3
     pipeline_retry_backoff_base_seconds: float = 60.0
     pipeline_retry_backoff_max_seconds: float = 3600.0
-
-    def credentials_path(self) -> Path | None:
-        """Resolve the service account JSON path.
-
-        Absolute paths are used as-is. Relative paths are resolved against the
-        repository root first, then the backend directory, so both
-        ``secrets/service-account.json`` and ``backend/secrets/service-account.json``
-        (relative to the repo root) work.
-        """
-        raw = self.google_application_credentials.strip()
-        if not raw:
-            return None
-        path = Path(raw)
-        if path.is_absolute():
-            return path
-        for base in (REPO_ROOT, BACKEND_DIR):
-            candidate = (base / path).resolve()
-            if candidate.exists():
-                return candidate
-        return (REPO_ROOT / path).resolve()
 
 
 @lru_cache(maxsize=1)

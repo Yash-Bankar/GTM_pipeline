@@ -40,7 +40,7 @@ Automate a go-to-market pipeline around Instagram finance creators:
    +-------------------+
 ```
 
-**No database.** Google Sheets holds all durable state.
+**PostgreSQL** holds all durable state (Alembic-managed schema).
 
 ## 3. Components
 
@@ -48,40 +48,30 @@ Automate a go-to-market pipeline around Instagram finance creators:
 - Next.js (App Router) + React + TypeScript + Tailwind CSS.
 - Responsibility: operations dashboard. Shows queue/status, lets operators
   trigger stages and review generated outreach.
-- Talks only to the FastAPI backend. It never reads or writes Google Sheets
-  directly and never holds provider secrets.
+- Talks only to the FastAPI backend. It never touches the database directly and
+  never holds provider secrets.
 
 ### 3.2 Backend API — `backend/app/main.py`
 - FastAPI.
-- Responsibility: validation + orchestration surface for the frontend and for
-  inbound handle capture. Reads/writes operational state in Google Sheets
-  through the Sheets adapter (Phase 1). Triggers worker work by writing job
-  state to Sheets.
-- Stateless: no in-memory job state that survives a restart and is not reflected
-  in Sheets.
-- Current state: health check + lead capture/retrieval endpoints (Phase 2); see
-  [api.md](api.md).
+- Responsibility: validation + orchestration surface for the frontend and inbound
+  handle capture. Reads/writes operational state through the repository
+  (`backend/app/db/`). Triggers worker work by enqueuing jobs.
+- Stateless: no in-memory job state; all durable state is in PostgreSQL.
+- Current state: health check + lead capture/retrieval + dashboard read endpoints
+  (Phases 2 & 7); see [api.md](api.md).
 
-### 3.3 Worker — `backend/app/worker.py`
+### 3.3 Worker — `backend/app/worker/`
 - Long-running Python process.
-- Responsibility: poll Google Sheets for pending work, run the enrichment and
-  generation stages, and write results back to Sheets.
-- Restart-safe and idempotent by relying on status columns in Sheets rather than
-  an in-memory queue.
-- Shares the same Python virtual environment and can reuse shared client modules
-  with the API. (Split into a separate deployable later if needed.)
-- Current state: entrypoint stub only.
+- Responsibility: poll `pipeline_jobs` for pending work, run the enrichment and
+  generation stages, and write results back to PostgreSQL.
+- Restart-safe and idempotent via job status columns and upserts.
+- Shares the same Python virtual environment as the API. (Split into a separate
+  deployable later if needed.)
 
-### 3.4 Google Sheets — source of truth
-Operational tabs and their roles:
-
-| Tab | Role | Status |
-| --- | --- | --- |
-| `IG Leads` | Raw captured handles (input). | Contract to be finalized in Phase 1 |
-| `Deduplicated Leads` | Deduplicated, qualified handles with a processing gate. | Contract to be finalized in Phase 1 |
-| `instagram_leads_enriched` | Enriched profile + website evidence. | Contract to be finalized in Phase 1 |
-| `Outreach` | AI-generated outreach content. | Contract to be finalized in Phase 4 |
-| `Sheet4` | Unknown. | **Unverified — needs owner clarification** |
+### 3.4 PostgreSQL — source of truth
+Durable state lives in six tables (see [database.md](database.md)): `leads`,
+`lead_posts`, `website_pages`, `dossiers`, `outreach_drafts`, `pipeline_jobs`.
+The schema is managed by Alembic migrations.
 
 ### 3.5 External services
 - **HikerAPI** — Instagram profile/media data.
@@ -128,13 +118,13 @@ IG Leads   ------->  Deduplicated Leads -->  HikerAPI profile   ------>  Gemini 
   website crawling; stop on throttle/challenge signals.
 - **Observability:** structured logging; per-row `last_error`; no silent failures.
 - **Testing:** `pytest` for backend/worker; lint + typecheck for frontend.
-- **Security:** no secrets in code or git; service account JSON stays in
-  `secrets/` (gitignored); the frontend never receives provider credentials.
+- **Security:** no secrets in code or git; database credentials come from
+  `DATABASE_URL` (gitignored `.env`); the frontend never receives provider
+  credentials.
 
 ## 7. Explicit non-goals (MVP)
 
-- No SQL/NoSQL database.
-- No authentication/multi-tenancy.
+- No multi-tenant authentication (a simple dashboard password gate only).
 - No production hosting/infrastructure-as-code yet.
 - No automated DM sending (outreach is content generation; sending is out of
   scope for the MVP).
@@ -160,16 +150,13 @@ before its predecessor's exit criteria are met.
 - **Exit criteria:** backend `/health` responds; `frontend` builds; no secrets
   committed; docs reviewed.
 
-### Phase 1 — Google Sheets data contract + adapter
-- **Deliverables:** settings loader; Sheets auth (service account); read/write
-  adapter; canonical schemas for the four known tabs; schema validation; a dry
-  read of each tab.
+### Phase 1 — Storage adapter (Google Sheets, later replaced by PostgreSQL)
+- **Deliverables:** settings loader; read/write adapter; canonical schemas;
+  schema validation.
 - **Boundary:** no scraping, no AI.
-- **Exit criteria:** can list/read/append rows and update status cells against a
-  test spreadsheet; headers validated.
-- **Status:** implemented in `backend/app/sheets/`. Contract, identity rules and
-  the non-destructive header policy are documented in
-  [sheets-contract.md](sheets-contract.md).
+- **Exit criteria:** can read/append rows and update status against a test store.
+- **Status:** originally implemented on Google Sheets, then **replaced** by the
+  PostgreSQL layer in Phase 11. See [database.md](database.md).
 
 ### Phase 2 — Lead API (FastAPI)
 - **Deliverables:** lead endpoints (submit/list/get); username/URL validation and
@@ -243,11 +230,9 @@ before its predecessor's exit criteria are met.
 
 ### Phase 9 — Orchestration & scheduling hardening
 - **Deliverables:** worker scheduling, retries/backoff, stale-job recovery,
-  observability, run configuration; a Sheets-based work lease to allow more than
+  observability, run configuration; a database-based work lease to allow more than
   one writer.
 - **Exit criteria:** unattended daily operation is reliable.
-- **Note:** a planned data-migration phase was intentionally skipped — there is
-  no database to migrate.
 
 ### Phase 10 — Operations, testing & deployment
 - **Deliverables:** backend/worker container images + Compose, a deployment guide
@@ -256,15 +241,20 @@ before its predecessor's exit criteria are met.
 - **Status:** implemented — `Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile`,
   [deployment.md](deployment.md), [runbook.md](runbook.md).
 
-### Phase 11 — Hermes Agent integration
+### Phase 11 — Database migration (Sheets → PostgreSQL)
+- **Deliverables:** SQLAlchemy models + repository, Alembic migrations, a Postgres
+  service in Compose, removal of the Google Sheets adapter, and tests on SQLite.
+- **Exit criteria:** API + worker function identically against PostgreSQL.
+- **Status:** implemented — `backend/app/db/`, `backend/alembic/`, `docs/database.md`.
+
+### Phase 12 — Hermes Agent integration
 - **Deliverables:** agent integration over enriched/outreach data.
 - **Exit criteria:** defined once Hermes's interface is known.
 
 ## 10. Open questions (need owner input)
 
-- What is `Sheet4` for? (currently **unverified**)
-- Exact column contract for `Outreach`.
-- Google Sheets auth: service account vs OAuth user flow.
+- Exact contract for `Outreach` review workflow.
 - HikerAPI plan/limits and the Instagram session model.
 - Hosting/runtime target for API + worker and desired schedule.
+- When to allow more than one writer (database lease) and scale workers.
 - Hermes Agent interface and responsibilities.

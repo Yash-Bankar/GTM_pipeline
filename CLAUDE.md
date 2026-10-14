@@ -7,12 +7,12 @@ Automation** repository.
 
 An automation pipeline for a GTM motion around Instagram creators. It collects
 handles, deduplicates them, enriches them with public Instagram + website data,
-generates AI outreach, and tracks every stage in Google Sheets.
+generates AI outreach, and tracks every stage in PostgreSQL.
 
 ## Orientation (read before coding)
 
 1. Read [docs/architecture.md](docs/architecture.md). It defines the components,
-   the data flow, the Google Sheets data contract, and the phased plan.
+   the data flow, the database contract, and the phased plan.
 2. Identify the phase you are working in. **Do not implement work from a later
    phase.** Phase 0 is foundation only.
 3. Prefer the smallest change that satisfies the current phase.
@@ -28,8 +28,8 @@ generates AI outreach, and tracks every stage in Google Sheets.
 
 ## Hard rules
 
-- **Google Sheets is the source of truth** for operational data. Do not add a
-  SQL/NoSQL database for the MVP.
+- **PostgreSQL is the source of truth** for operational data. Do not add Google
+  Sheets or a second datastore for the MVP.
 - **Never commit secrets.** No API keys, tokens, spreadsheet IDs, or service
   account JSON in source. Use `.env` (gitignored). Keep `.env.example` updated
   with placeholder names only.
@@ -61,40 +61,35 @@ versions.
   (added in Phase 1) — never hardcode environment-specific values.
 - Windows-first: provide PowerShell commands in docs and scripts.
 
-## Google Sheets storage rules (Phase 1)
+## Database rules (PostgreSQL)
 
-- The Sheets adapter is `backend/app/sheets/`. Tab schemas, identity rules, and
-  the non-destructive header policy are in
-  [docs/sheets-contract.md](docs/sheets-contract.md).
-- Map rows by **header name**, never by fixed column index.
-- `leadId` is the stable internal identifier; `usernameNormalized` is the dedup
-  key. Use `LeadStore.create_lead(...)` rather than writing rows by hand.
-- Never overwrite an existing header row or unrelated cells; use targeted,
-  header-named updates.
-- One backend instance / one worker only: mutations are serialized in-process.
-  Do not add a concurrent job claimer until a Sheets-based lease exists.
-- **Rate limits:** 429 quota errors use a dedicated long backoff
-  (`GOOGLE_SHEETS_QUOTA_BACKOFF_BASE_SECONDS` → `..._MAX_SECONDS`, 10s→60s), and
-  tab titles / header layouts are cached in memory
-  (`GOOGLE_SHEETS_LAYOUT_CACHE_TTL_SECONDS`) so the worker does not re-read
-  headers on every operation. Invalidate the cache after any header write.
+- The storage layer is `backend/app/db/` (`database.py`, `models.py`,
+  `schemas.py`, `repository.py`). Schema and contracts: [docs/database.md](docs/database.md).
+- PostgreSQL is the **only** datastore. Do not add Google Sheets, SQLite, or a
+  second database (tests use in-memory SQLite via fixtures only).
+- Access data through `Repository`; never issue ad-hoc queries from routes/stages.
+- `lead_id` is the stable internal identifier; `username_normalized` has a unique
+  index (the dedupe key). Use `create_or_get_lead(...)` — do not hand-roll dedupe.
+- Idempotency: `pipeline_jobs` has a unique `(stage, lead_id)`; posts/pages/
+  dossiers/outreach upsert by primary key and preserve `created_at`.
+- Schema changes require an Alembic migration (`alembic revision --autogenerate`).
 - Do not call HikerAPI, Gemini, or scrape websites from the storage layer.
 
 ## Lead API rules (Phase 2)
 
 - The API is `backend/app/leads/` + `backend/app/main.py`; reference in
   [docs/api.md](docs/api.md).
-- The browser/frontend must never call Google Sheets directly — only this API.
+- The browser/frontend must never touch the database directly — only this API.
 - Validate and normalize usernames via `app/leads/validation.py`; reject
   non-Instagram URLs and invalid handles with `422`.
 - Deduplicate by normalized username and return a clear `created` true/false. Use
-  `LeadStore.create_or_get_lead(...)`, which checks and appends under the write
-  lock — do not hand-roll find-then-create.
-- Assign the stable `leadId` in the store, never in the route handler.
-- New leads are enqueued by setting `status="queued"`; do not start scraping/AI.
+  `Repository.create_or_get_lead(...)`, which is atomic under a unique index.
+- Assign the stable `lead_id` in the repository, never in the route handler.
+- New leads are enqueued by creating a `profile_fetch` job; do not start
+  scraping/AI in the route.
 - Keep request/response models typed (`app/leads/schemas.py`).
-- Map storage failures to HTTP via the handlers in `main.py` (503 config/quota,
-  502 other Sheets errors).
+- Map storage failures to HTTP via the handlers in `main.py` (503 DB unavailable,
+  500 storage error).
 
 ## External provider rules (Phase 3)
 
@@ -187,7 +182,7 @@ versions.
   [extension/README.md](extension/README.md).
 - Capture **only** the profile handle/URL — no bio/follower/media scraping.
 - The extension talks **only** to the backend API (`POST /api/v1/leads`); never
-  to Google Sheets or providers. No provider secrets in the extension.
+  to the database or providers. No provider secrets in the extension.
 - The API key is user-supplied and stored in `chrome.storage.local`; send it as
   `x-api-key`. Surface clear created/duplicate/invalid/auth/network states.
 - Ignore repeated clicks while a request is in flight (disable the button).
@@ -198,10 +193,11 @@ versions.
 
 - Containers: `Dockerfile` (backend + worker, non-root, no secrets) and
   `docker-compose.yml`; guide in [deployment.md](docs/deployment.md).
-- Never bake secrets into images; inject env and mount the service-account JSON
-  read-only. Keep `.dockerignore`/`.gitignore` covering secrets.
+- Never bake secrets into images; inject env (including `DATABASE_URL`) at runtime.
+  Keep `.dockerignore`/`.gitignore` covering secrets.
 - **One worker replica only** (single writer). Scale dashboard/API reads, not
-  writers, until a Sheets-based lease exists.
+  writers, until a database-based lease exists.
+- Run migrations (`alembic upgrade head`) before rolling out the API/worker.
 - Keep `backend/.env.example` and `frontend/.env.example` in sync with
   `Settings` and `process.env.*` usage — no undocumented variables.
 - Frontend vars live in `frontend/.env.local` (Next does **not** read the
@@ -222,8 +218,9 @@ cd backend; .\.venv\Scripts\python.exe -m app.worker --drain; cd ..
 # Python tests
 .\backend\.venv\Scripts\python.exe -m pytest
 
-# Sheets storage integration check (needs .env + service account)
-.\backend\.venv\Scripts\python.exe scripts\verify_sheets.py --check-only
+# Database migrations + check (needs DATABASE_URL)
+cd backend; .\.venv\Scripts\python.exe -m alembic upgrade head; cd ..
+.\backend\.venv\Scripts\python.exe scripts\verify_db.py
 
 # HikerAPI manual profile check (needs HIKERAPI_KEY)
 .\backend\.venv\Scripts\python.exe scripts\check_hikerapi.py --username natgeo
