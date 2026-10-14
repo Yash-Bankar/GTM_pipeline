@@ -13,6 +13,12 @@ a Next.js console — with **PostgreSQL as the single source of truth**.
 
 ---
 
+## Screenshots
+<img width="1919" height="902" alt="image" src="https://github.com/user-attachments/assets/8e1f8226-b1ec-48ad-a45c-28138f51a831" />
+<img width="1919" height="331" alt="image" src="https://github.com/user-attachments/assets/5c52833c-5533-4f48-80c9-21c05af1a17a" />
+
+
+
 ## 1. Overview & Architecture
 
 Synpo GTM is a small, opinionated stack:
