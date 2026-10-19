@@ -36,6 +36,7 @@ from .models import (
 from .models import (
     WebsitePage as PageORM,
 )
+from .progress import derive_research_status, research_remedy
 from .schemas import (
     Dossier,
     Lead,
@@ -75,12 +76,57 @@ class Repository:
         rows = self.session.scalars(select(LeadORM).order_by(LeadORM.created_at)).all()
         return [Lead.model_validate(row) for row in rows]
 
+    def _jobs_by_lead(self) -> dict[str, list[PipelineJob]]:
+        grouped: dict[str, list[PipelineJob]] = {}
+        for row in self.session.scalars(select(JobORM)).all():
+            grouped.setdefault(row.lead_id, []).append(PipelineJob.model_validate(row))
+        return grouped
+
+    def list_leads_with_progress(self) -> list[tuple[Lead, str, str]]:
+        """Return ``(lead, derived_progress, remedy)`` for every lead.
+
+        The derived progress is computed once, here, so list rows, filters and
+        stats all agree (PRD T01).
+        """
+        jobs_by_lead = self._jobs_by_lead()
+        result: list[tuple[Lead, str, str]] = []
+        for lead in self.list_leads():
+            jobs = jobs_by_lead.get(lead.lead_id, [])
+            result.append(
+                (
+                    lead,
+                    derive_research_status(lead.status, jobs),
+                    research_remedy(lead.status, jobs),
+                )
+            )
+        return result
+
+    def lead_progress(self, lead_id: str) -> tuple[str, str]:
+        """Return ``(derived_progress, remedy)`` for a single lead."""
+        lead = self.get_lead(lead_id)
+        if lead is None:
+            return ("", "")
+        jobs = self.list_jobs(lead_id)
+        return (
+            derive_research_status(lead.status, jobs),
+            research_remedy(lead.status, jobs),
+        )
+
     def find_lead_by_username(self, username: str) -> Lead | None:
         normalized = normalize_username(username)
         if not normalized:
             return None
         row = self.session.scalar(
             select(LeadORM).where(LeadORM.username_normalized == normalized)
+        )
+        return Lead.model_validate(row) if row is not None else None
+
+    def find_lead_by_request_id(self, request_id: str) -> Lead | None:
+        """Return the lead captured with this client request id (idempotent retries)."""
+        if not request_id:
+            return None
+        row = self.session.scalar(
+            select(LeadORM).where(LeadORM.request_id == request_id)
         )
         return Lead.model_validate(row) if row is not None else None
 
@@ -411,6 +457,25 @@ class Repository:
         self.session.commit()
         return status
 
+    def defer(self, job: PipelineJob, seconds: float = 30.0) -> None:
+        """Return a claimed job to the queue without counting a failed attempt.
+
+        Used for dependency-aware scheduling: a stage that must wait for another
+        job's terminal state re-queues itself instead of retrying or failing.
+        """
+        row = self.session.get(JobORM, job.job_id)
+        if row is None:
+            return
+        row.status = constants.JOB_QUEUED
+        # Undo the increment performed when the job was claimed.
+        row.attempt_count = max(0, job.attempt_count - 1)
+        row.run_after = _iso_after(max(0.0, seconds))
+        row.last_error = ""
+        row.locked_at = ""
+        row.locked_by = ""
+        row.updated_at = utc_now_iso()
+        self.session.commit()
+
     def recover_stale_jobs(self, stale_after_minutes: int = 30) -> int:
         cutoff = (
             datetime.now(timezone.utc) - timedelta(minutes=max(0, stale_after_minutes))
@@ -437,19 +502,29 @@ class Repository:
     # -- stats --------------------------------------------------------------
 
     def stats(self) -> dict[str, Any]:
-        leads = self.list_leads()
+        leads_with_progress = self.list_leads_with_progress()
+        leads = [lead for lead, _progress, _remedy in leads_with_progress]
+
         by_status: dict[str, int] = {}
         for lead in leads:
             by_status[lead.status or "unknown"] = by_status.get(lead.status or "unknown", 0) + 1
+
+        # Truthful counters use the same derived progress as rows/filters (T01).
+        by_progress: dict[str, int] = {}
+        for _lead, progress, _remedy in leads_with_progress:
+            by_progress[progress] = by_progress.get(progress, 0) + 1
+
         jobs = self.session.scalars(select(JobORM)).all()
         job_status: dict[str, int] = {}
         for job in jobs:
             job_status[job.status] = job_status.get(job.status, 0) + 1
+
         dossiers = self.session.scalars(select(DossierORM)).all()
         outreach = self.session.scalars(select(OutreachORM)).all()
         return {
             "leads_total": len(leads),
             "leads_by_status": by_status,
+            "leads_by_progress": by_progress,
             "jobs_by_status": job_status,
             "dossiers_total": len(dossiers),
             "outreach_total": len(outreach),

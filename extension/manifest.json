@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Synpo GTM Lead Capture",
-  "version": "0.1.0",
-  "description": "Send the current Instagram profile to the Synpo GTM pipeline. No scraping, no Google Sheets access.",
+  "version": "0.2.0",
+  "description": "Capture the open Instagram profile (public snapshot) and verified accounts into the Synpo GTM pipeline. No provider secrets, no automatic enrichment.",
   "permissions": ["activeTab", "storage"],
   "host_permissions": [
     "https://www.instagram.com/*",

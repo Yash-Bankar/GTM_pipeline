@@ -73,7 +73,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
     );
   }
 
-  const byStatus = stats.leads_by_status ?? {};
+  const byProgress = stats.leads_by_progress ?? {};
+  const researching = (byProgress.queued ?? 0) + (byProgress.running ?? 0);
   const start = leads.total === 0 ? 0 : leads.offset + 1;
   const end = Math.min(leads.offset + leads.items.length, leads.total);
 
@@ -82,14 +83,18 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
       {header}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Total leads" value={stats.leads_total} />
-        <StatCard label="Enriched" value={byStatus.enriched ?? 0} hint="Profile data collected" />
-        <StatCard label="Queued" value={byStatus.queued ?? 0} hint="Awaiting the worker" />
         <StatCard
-          label="Outreach to review"
-          value={stats.outreach_needs_review}
-          hint="Drafts marked NEEDS_REVIEW"
+          label="Needs attention"
+          value={byProgress.blocked ?? 0}
+          hint="Blocked — see remedy"
         />
+        <StatCard
+          label="Ready for review"
+          value={byProgress.ready ?? 0}
+          hint="Research complete"
+        />
+        <StatCard label="Researching" value={researching} hint="Queued or running" />
+        <StatCard label="Total captured" value={stats.leads_total} />
       </div>
 
       <Card className="mt-5">

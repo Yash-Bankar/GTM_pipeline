@@ -174,6 +174,8 @@ class OutreachOut(BaseModel):
 
 class LeadDetailOut(BaseModel):
     lead: LeadResponse
+    progress: str = "needs_data"
+    progress_remedy: str = ""
     posts: list[PostOut] = Field(default_factory=list)
     website_pages: list[WebsitePageOut] = Field(default_factory=list)
     jobs: list[JobOut] = Field(default_factory=list)
@@ -212,6 +214,7 @@ class OutreachUpdateRequest(BaseModel):
 class StatsOut(BaseModel):
     leads_total: int
     leads_by_status: dict[str, int]
+    leads_by_progress: dict[str, int]
     jobs_by_status: dict[str, int]
     dossiers_total: int
     outreach_total: int

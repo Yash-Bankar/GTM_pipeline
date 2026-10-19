@@ -30,11 +30,57 @@ Request:
 - `username` (required): handle (with/without `@`) or `instagram.com` profile URL.
 - `source` (optional, default `api`): provenance label.
 
+Capture clients (the browser extension) may add a `request_id` and a
+`profile_snapshot`. Both are optional and handle-only clients keep working:
+
+```json
+{
+  "username": "@example_creator",
+  "source": "extension",
+  "request_id": "stable-client-generated-uuid",
+  "profile_snapshot": {
+    "display_name": "Example Creator",
+    "is_verified": true,
+    "bio": "Personal finance education.",
+    "external_urls": ["https://example.com"],
+    "followers": { "value": 12300, "display": "12.3K", "precision": "approximate" },
+    "following": null,
+    "post_count": null,
+    "source_url": "https://www.instagram.com/example_creator/",
+    "captured_at": "2026-10-19T04:50:00Z",
+    "parser_version": "1",
+    "missing_fields": ["following", "post_count"]
+  }
+}
+```
+
+- `request_id` (optional): a stable, client-generated id. Repeating the same id
+  returns the original lead (HTTP 200) without creating a new job.
+- `profile_snapshot` (optional): the sanitized public snapshot. Fields are
+  bounded server-side — `bio` to 2,200 chars and `external_urls` to 10 valid
+  http(s) URLs (tracking parameters removed, `instagram.com`/Meta hosts dropped).
+  A malformed optional field becomes *missing*, never a fabricated value; a count
+  with unknown precision stores `value: null`. The snapshot only **fills** lead
+  fields that are empty — known values are never erased. Contact fields
+  (`business_email`/`business_phone_number`) are **not** populated from a
+  snapshot (PRD §5.4).
+
 Responses:
 
-- `201 Created` — new lead: `{ "created": true, "lead": { ... } }`
-- `200 OK` — existing lead returned: `{ "created": false, "lead": { ... } }`
-- `422 Unprocessable Entity` — invalid username/URL (typed validation error).
+- `201 Created` — new lead: `{ "created": true, "outcome": "new", "missing_fields": [...], "lead": { ... } }`
+- `200 OK` — existing lead returned: `{ "created": false, "outcome": "unchanged" | "updated", ... }`
+  (`updated` means the snapshot filled at least one previously-empty field).
+- `422 Unprocessable Entity` — invalid username/URL or an unknown top-level field.
+
+There is **no bulk endpoint**: submit one account per request and aggregate the
+results client-side.
+
+Each returned `lead` also carries a read-only `snapshot` object (or `null` for
+handle-only/HikerAPI leads) with `is_verified`, `external_urls`, the
+`followers`/`following`/`post_count` observations (`value`, `display`,
+`precision`), `source_url`, `captured_at`, `parser_version` and
+`missing_fields`. The snapshot's raw `bio` is intentionally **not** exposed — the
+lead's masked `bio` is returned instead (PRD A24).
 
 ### `GET /api/v1/leads`
 

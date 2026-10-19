@@ -41,21 +41,29 @@ export default async function DossiersPage({ searchParams }: { searchParams: Sea
         <ErrorState title="Could not load dossiers" message={errorMessage ?? "No data returned."} />
       ) : (
         <Card>
-          <CardHeader
-            title="Research"
-            subtitle={`${data.total} dossier${data.total === 1 ? "" : "s"}`}
-            actions={
-              <form method="get" action="/dossiers" className="flex items-center gap-2">
-                <input name="q" defaultValue={q ?? ""} placeholder="Search…" className="field w-48" />
-                <button
-                  type="submit"
-                  className="rounded-lg border border-ink-600 px-3 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800"
-                >
-                  Search
-                </button>
-              </form>
-            }
-          />
+          <CardHeader title="Research" subtitle={`${data.total} dossier${data.total === 1 ? "" : "s"}`} />
+          <div className="border-b border-ink-800 px-5 py-3">
+            <form method="get" action="/dossiers" className="flex flex-wrap items-end gap-2">
+              <div className="min-w-0 flex-1 sm:min-w-[15rem]">
+                <label htmlFor="dossier-search" className="mb-1 block text-xs font-medium text-mist-300">
+                  Search creators
+                </label>
+                <input
+                  id="dossier-search"
+                  name="q"
+                  defaultValue={q ?? ""}
+                  placeholder="Username or topic"
+                  className="field"
+                />
+              </div>
+              <button
+                type="submit"
+                className="min-h-11 rounded-lg border border-ink-600 px-3 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400"
+              >
+                Search
+              </button>
+            </form>
+          </div>
           {data.items.length === 0 ? (
             <EmptyState
               title="No dossiers yet"

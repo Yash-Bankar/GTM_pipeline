@@ -41,7 +41,12 @@ export function StatusBadge({ status }: { status: string }) {
   const value = (status || "").toLowerCase();
   const processing = value === "running";
   const waiting = value === "queued" || value === "retry";
-  const finished = value === "done" || value === "enriched" || value === "approved";
+  const finished =
+    value === "done" ||
+    value === "enriched" ||
+    value === "approved" ||
+    value === "ready" ||
+    value === "found";
   return (
     <Badge tone={statusTone(status)}>
       {processing ? (
@@ -68,6 +73,30 @@ export function StatusBadge({ status }: { status: string }) {
 export function TierBadge({ tier }: { tier: string }) {
   if (!tier) return <Badge>—</Badge>;
   return <Badge tone={tierTone(tier)}>Tier {tier}</Badge>;
+}
+
+/** Blue verified checkmark shown next to a creator handle. */
+export function VerifiedBadge({ className }: { className?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label="Verified account"
+      title="Verified account"
+      className={cn("inline-flex shrink-0 align-middle text-sky-400", className)}
+    >
+      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden focusable="false">
+        <circle cx="12" cy="12" r="10" fill="currentColor" />
+        <path
+          d="M7 12.4l3.2 3.2L17 8.8"
+          fill="none"
+          stroke="#0a101c"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
 }
 
 export function Card({
@@ -114,7 +143,7 @@ export function PageHeader({
   description,
   actions,
 }: {
-  title: string;
+  title: ReactNode;
   description?: string;
   actions?: ReactNode;
 }) {

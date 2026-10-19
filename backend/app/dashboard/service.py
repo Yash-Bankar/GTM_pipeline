@@ -26,6 +26,8 @@ OUTREACH_STATUSES = {
 @dataclass
 class LeadDetail:
     lead: Lead
+    progress: str = "needs_data"
+    progress_remedy: str = ""
     posts: list[LeadPost] = field(default_factory=list)
     website_pages: list[WebsitePage] = field(default_factory=list)
     jobs: list[PipelineJob] = field(default_factory=list)
@@ -41,8 +43,11 @@ class DashboardService:
         lead = self._repo.get_lead(lead_id)
         if lead is None:
             return None
+        progress, remedy = self._repo.lead_progress(lead_id)
         return LeadDetail(
             lead=lead,
+            progress=progress,
+            progress_remedy=remedy,
             posts=self._repo.list_posts(lead_id),
             website_pages=self._repo.list_website_pages(lead_id),
             jobs=self._repo.list_jobs(lead_id),

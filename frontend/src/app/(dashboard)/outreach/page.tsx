@@ -35,27 +35,29 @@ export default async function OutreachPage({ searchParams }: { searchParams: Sea
         <ErrorState title="Could not load outreach" message={errorMessage ?? "No data returned."} />
       ) : (
         <Card>
-          <CardHeader
-            title="Drafts"
-            subtitle={`${data.total} draft${data.total === 1 ? "" : "s"}`}
-            actions={
-              <form method="get" action="/outreach" className="flex items-center gap-2">
-                <select name="status" defaultValue={status ?? ""} className="field w-44">
+          <CardHeader title="Drafts" subtitle={`${data.total} draft${data.total === 1 ? "" : "s"}`} />
+          <div className="border-b border-ink-800 px-5 py-3">
+            <form method="get" action="/outreach" className="flex flex-wrap items-end gap-2">
+              <div className="sm:min-w-[12rem]">
+                <label htmlFor="outreach-status" className="mb-1 block text-xs font-medium text-mist-300">
+                  Draft status
+                </label>
+                <select id="outreach-status" name="status" defaultValue={status ?? ""} className="field">
                   {STATUS_OPTIONS.map((option) => (
                     <option key={option || "all"} value={option}>
                       {option ? option.replace(/_/g, " ") : "All statuses"}
                     </option>
                   ))}
                 </select>
-                <button
-                  type="submit"
-                  className="rounded-lg border border-ink-600 px-3 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800"
-                >
-                  Filter
-                </button>
-              </form>
-            }
-          />
+              </div>
+              <button
+                type="submit"
+                className="min-h-11 rounded-lg border border-ink-600 px-3 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400"
+              >
+                Filter
+              </button>
+            </form>
+          </div>
           {data.items.length === 0 ? (
             <EmptyState
               title="No drafts"

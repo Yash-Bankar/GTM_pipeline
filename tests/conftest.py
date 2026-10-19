@@ -19,12 +19,14 @@ from app.db.repository import Repository  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _isolate_api_key(monkeypatch):
-    """Keep tests independent of a developer's local .env API_KEY.
+def _isolate_env(monkeypatch):
+    """Keep tests independent of a developer's local .env.
 
-    Tests that exercise auth set API_KEY themselves (and clear the cache).
+    Forces no API key and no Gemini key so AI-unavailable paths are deterministic;
+    tests that need auth or AI set these themselves (and clear the cache).
     """
     monkeypatch.setenv("API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

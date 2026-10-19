@@ -42,12 +42,16 @@ SESSION_SECRET=                      # optional HMAC secret for the session cook
 
 | Route | What it shows |
 | --- | --- |
-| `/leads` | Searchable, filterable leads table; add-lead form; pipeline stats |
-| `/leads/[leadId]` | Profile, recent posts, website pages, job history; re-queue processing or **re-process AI jobs only** |
-| `/dossiers` | Dossier list with qualification score/tier |
+| `/leads` | Searchable, filterable leads table; verified badge; follower precision; add-lead form; pipeline stats |
+| `/leads/[leadId]` | Profile snapshot (verified badge, bio, links, follower precision, missing fields), recent posts, website pages, job history; re-queue processing or **re-process AI jobs only** |
+| `/dossiers` | Dossier list with qualification score/tier; visible **Search creators** label |
 | `/dossiers/[leadId]` | Structured AI findings, criterion scores, cited sources, uncertainty |
-| `/outreach` | Draft list with status filter |
+| `/outreach` | Draft list with a visible **Draft status** filter |
 | `/outreach/[leadId]` | Editable email + DM draft with Approve / Reject (nothing is sent) |
+
+Navigation is a sidebar at `lg+` and a visible compact top bar below `lg` (no
+hover-only menus); section links expose `aria-current`. Snapshot-only leads show
+"Posts not captured in snapshot" instead of an ambiguous empty posts section.
 
 ## States
 

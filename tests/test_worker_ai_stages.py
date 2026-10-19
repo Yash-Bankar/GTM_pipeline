@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from app.ai import AIService, DEFAULT_RUBRIC
 from app.ai.schemas import CriterionScore, DossierDraft, OutreachDraft
 from app.constants import AI_STATUS_ERROR, AI_STATUS_INSUFFICIENT, AI_STATUS_NEEDS_REVIEW
 from app.db.repository import Repository
-from app.db.schemas import Dossier, LeadPost, PipelineJob, WebsitePage
+from app.db.schemas import Dossier, LeadPost, OutreachEntry, PipelineJob, WebsitePage
 from app.providers.errors import AIRateLimitError, AIResponseError
 from app.worker.pipeline import AIDossierStage, AIOutreachStage
 from fakes import FakeAIProvider
@@ -168,3 +170,77 @@ def test_outreach_stage_does_not_regenerate(repo: Repository) -> None:
     stage.run(job, repo)
     assert provider.calls == 1
     assert len(repo.list_outreach()) == 1
+
+
+@pytest.mark.parametrize("status", ["APPROVED", "REJECTED", AI_STATUS_NEEDS_REVIEW])
+def test_outreach_stage_preserves_reviewed_drafts(repo: Repository, status: str) -> None:
+    """A rerun must never overwrite a draft the user has reviewed (PRD A28)."""
+    lead, job = _outreach_job(repo, f"ai.preserve.{status.lower()}")
+    repo.upsert_outreach(
+        OutreachEntry(
+            lead_id=lead.lead_id,
+            username=lead.username,
+            status=status,
+            subject="Original subject",
+            body="Original body",
+            dm_body="Original DM",
+        )
+    )
+    provider = FakeAIProvider(outreach=OutreachDraft(emailSubject="NEW", emailBody="NEW", dmBody="NEW"))
+
+    outcome = _outreach_stage(provider).run(job, repo)
+
+    assert outcome.ok
+    assert provider.calls == 0
+    entry = repo.get_outreach(lead.lead_id)
+    assert entry.status == status
+    assert entry.subject == "Original subject"
+    assert entry.body == "Original body"
+    assert entry.dm_body == "Original DM"
+
+
+def test_outreach_stage_force_does_not_overwrite_approved_draft(repo: Repository) -> None:
+    """Explicit regeneration cannot clobber a draft until revision storage exists."""
+    lead = repo.create_or_get_lead("ai.forcedraft")[1]
+    repo.upsert_outreach(
+        OutreachEntry(
+            lead_id=lead.lead_id,
+            username=lead.username,
+            status="APPROVED",
+            subject="Keep me",
+            body="Keep body",
+            dm_body="Keep DM",
+        )
+    )
+    forced_job = PipelineJob(
+        job_id="job_force_outreach",
+        stage="ai_outreach",
+        lead_id=lead.lead_id,
+        username=lead.username,
+        username_normalized=lead.username_normalized,
+        status="running",
+        attempt_count=1,
+        max_attempts=3,
+        payload='{"force": true}',
+    )
+    provider = FakeAIProvider(outreach=OutreachDraft(emailSubject="NEW", emailBody="NEW", dmBody="NEW"))
+
+    outcome = _outreach_stage(provider).run(forced_job, repo)
+
+    assert outcome.ok
+    assert provider.calls == 0
+    assert repo.get_outreach(lead.lead_id).subject == "Keep me"
+
+
+def test_outreach_stage_preserves_authored_draft_without_review_status(repo: Repository) -> None:
+    lead, job = _outreach_job(repo, "ai.authored")
+    repo.upsert_outreach(
+        OutreachEntry(lead_id=lead.lead_id, username=lead.username, status="", subject="Hand-written")
+    )
+    provider = FakeAIProvider(outreach=OutreachDraft(emailSubject="NEW", emailBody="NEW", dmBody="NEW"))
+
+    outcome = _outreach_stage(provider).run(job, repo)
+
+    assert outcome.ok
+    assert provider.calls == 0
+    assert repo.get_outreach(lead.lead_id).subject == "Hand-written"

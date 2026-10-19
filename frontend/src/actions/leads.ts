@@ -10,14 +10,17 @@ export interface AddLeadState {
   status: "idle" | "created" | "duplicate" | "error";
   message?: string;
   leadId?: string;
+  invalid?: boolean;
 }
+
+const INVALID_MESSAGE = "Enter an Instagram username or profile URL.";
 
 export async function addLead(_prev: AddLeadState, formData: FormData): Promise<AddLeadState> {
   await requireSession();
 
   const username = String(formData.get("username") ?? "").trim();
   if (!username) {
-    return { status: "error", message: "Enter a username or Instagram profile URL." };
+    return { status: "error", message: INVALID_MESSAGE, invalid: true };
   }
 
   try {
@@ -31,6 +34,9 @@ export async function addLead(_prev: AddLeadState, formData: FormData): Promise<
         : `@${result.lead.username} is already in the pipeline.`,
     };
   } catch (error) {
+    if (error instanceof ApiError && error.status === 422) {
+      return { status: "error", message: INVALID_MESSAGE, invalid: true };
+    }
     return {
       status: "error",
       message: error instanceof ApiError ? error.message : "Could not add the lead.",

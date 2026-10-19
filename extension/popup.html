@@ -14,12 +14,17 @@
       </header>
 
       <section class="profile">
-        <span class="muted">Current profile</span>
+        <span class="muted">Active profile</span>
         <strong id="handle">—</strong>
+        <div id="snapshot" class="snapshot" hidden></div>
       </section>
 
       <button id="addButton" type="button">Add to pipeline</button>
+      <button id="addAllButton" type="button" class="secondary" hidden>Add All Verified</button>
+      <button id="retryButton" type="button" class="secondary" hidden>Retry unsaved</button>
+
       <p id="status" class="status">Open an Instagram profile page.</p>
+      <p id="batchResult" class="status" hidden></p>
 
       <details>
         <summary>Settings</summary>
@@ -28,6 +33,7 @@
         <label for="apiKey">API key <span class="muted">(x-api-key, optional)</span></label>
         <input id="apiKey" type="password" spellcheck="false" placeholder="optional" />
         <button id="saveSettings" type="button" class="secondary">Save settings</button>
+        <button id="checkConnection" type="button" class="secondary">Check connection</button>
         <p class="muted">Stored locally in this browser. The API key is never sent anywhere except your backend.</p>
       </details>
     </main>

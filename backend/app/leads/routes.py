@@ -36,7 +36,11 @@ def submit_lead(
         response.status_code = status.HTTP_200_OK
     return LeadSubmissionResponse(
         created=submission.created,
-        lead=LeadResponse.from_lead(submission.lead),
+        lead=LeadResponse.from_lead(
+            submission.lead, progress=submission.progress, remedy=submission.remedy
+        ),
+        outcome=submission.outcome,
+        missing_fields=submission.missing_fields,
     )
 
 
@@ -54,11 +58,14 @@ def list_leads(
     ),
     service: LeadService = Depends(get_lead_service),
 ) -> LeadListResponse:
-    leads, total = service.list(
+    rows, total = service.list(
         limit=limit, offset=offset, search=q, status=status_filter
     )
     return LeadListResponse(
-        items=[LeadResponse.from_lead(lead) for lead in leads],
+        items=[
+            LeadResponse.from_lead(lead, progress=progress, remedy=remedy)
+            for lead, progress, remedy in rows
+        ],
         total=total,
         limit=limit,
         offset=offset,
@@ -74,10 +81,11 @@ def get_lead(
     lead_id: str,
     service: LeadService = Depends(get_lead_service),
 ) -> LeadResponse:
-    lead = service.get(lead_id)
-    if lead is None:
+    result = service.get(lead_id)
+    if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No lead with leadId '{lead_id}'.",
         )
-    return LeadResponse.from_lead(lead)
+    lead, progress, remedy = result
+    return LeadResponse.from_lead(lead, progress=progress, remedy=remedy)

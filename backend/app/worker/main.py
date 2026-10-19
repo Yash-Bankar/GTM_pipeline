@@ -124,7 +124,10 @@ class Worker:
                         ok=False, error=f"{type(exc).__name__}: {exc}"[:1000], retryable=True
                     )
 
-            if outcome.ok:
+            if outcome.deferred:
+                repo.defer(job, outcome.defer_seconds)
+                logger.info("Job %s (%s) deferred: %s", job.job_id, job.stage, outcome.result)
+            elif outcome.ok:
                 repo.complete(job, outcome.result)
                 logger.info("Job %s (%s) done", job.job_id, job.stage)
             else:
@@ -142,7 +145,12 @@ class Worker:
 
 
 def build_stages(settings: Settings) -> dict[str, Stage]:
-    hiker = HikerAPIClient.from_settings(settings)
+    hiker_enabled = bool(settings.hikerapi_key.strip())
+    hiker = HikerAPIClient.from_settings(settings) if hiker_enabled else None
+    if not hiker_enabled:
+        logger.warning(
+            "HIKERAPI_KEY is not set; profile_fetch will use captured snapshots only."
+        )
     crawler = WebsiteCrawler(
         timeout=settings.website_timeout_seconds,
         max_pages=settings.website_max_pages,
@@ -160,6 +168,7 @@ def build_stages(settings: Settings) -> dict[str, Stage]:
             hiker,
             followup_max_attempts=settings.pipeline_max_attempts,
             enable_ai=ai_enabled,
+            hiker_enabled=hiker_enabled,
         ),
         STAGE_PROFILE_MEDIA: ProfileMediaStage(
             hiker,
@@ -214,8 +223,10 @@ def main() -> int:
 
     settings = get_settings()
     if not settings.hikerapi_key.strip():
-        logger.error("HIKERAPI_KEY is not set (see .env.example).")
-        return 2
+        logger.warning(
+            "HIKERAPI_KEY is not set; the worker will process captured snapshots only "
+            "(handle-only leads stay needs_data)."
+        )
 
     worker = Worker(
         session_factory=get_session_factory(),

@@ -48,7 +48,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = response.statusText || `Request failed (${response.status})`;
     try {
       const data = (await response.json()) as { detail?: unknown };
-      if (typeof data?.detail === "string") detail = data.detail;
+      if (typeof data?.detail === "string") {
+        detail = data.detail;
+      } else if (data?.detail && typeof data.detail === "object") {
+        const structured = data.detail as { message?: unknown };
+        detail =
+          typeof structured.message === "string"
+            ? structured.message
+            : JSON.stringify(data.detail);
+      }
     } catch {
       /* keep statusText */
     }

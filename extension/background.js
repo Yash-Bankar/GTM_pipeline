@@ -2,7 +2,8 @@
  * Service worker: the only place that talks to the backend API.
  *
  * Reads the user-configured API base URL + key from chrome.storage.local,
- * submits leads via SynpoLib, and returns a clear result to the caller.
+ * submits captures (with optional snapshots) via SynpoLib, and returns a clear
+ * result to the caller.
  */
 importScripts("lib.js");
 
@@ -22,15 +23,53 @@ async function handleSubmit(message) {
     apiBaseUrl: config.apiBaseUrl,
     apiKey: config.apiKey,
     username: message.username,
+    requestId: message.requestId,
+    snapshot: message.snapshot,
   });
 }
 
+async function handleCheckConnection() {
+  const config = await getConfig();
+  const base = SynpoLib.normalizeApiBase(config.apiBaseUrl || SynpoLib.DEFAULT_API_BASE);
+  if (!base) return { ok: false, state: "config", message: "Set the API URL first." };
+
+  const headers = { accept: "application/json" };
+  if (config.apiKey && config.apiKey.trim()) headers["x-api-key"] = config.apiKey.trim();
+
+  try {
+    const response = await fetch(`${base}/api/v1/leads?limit=1`, { headers });
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, state: "auth", message: "Invalid or missing API key." };
+    }
+    if (!response.ok) {
+      return { ok: false, state: "error", message: `Backend returned ${response.status}.` };
+    }
+    return { ok: true, state: "ok", message: "Connected." };
+  } catch {
+    return { ok: false, state: "network", message: "Cannot reach the API." };
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== "synpoSubmitLead") return false;
+  if (!message) return false;
 
-  handleSubmit(message)
-    .then((result) => sendResponse(result))
-    .catch((error) => sendResponse({ state: "error", message: String(error && error.message ? error.message : error) }));
+  if (message.type === "synpoSubmitLead") {
+    handleSubmit(message)
+      .then((result) => sendResponse(result))
+      .catch((error) =>
+        sendResponse({ state: "error", message: String(error && error.message ? error.message : error) }),
+      );
+    return true;
+  }
 
-  return true; // keep the message channel open for the async response
+  if (message.type === "synpoCheckConnection") {
+    handleCheckConnection()
+      .then((result) => sendResponse(result))
+      .catch((error) =>
+        sendResponse({ ok: false, state: "error", message: String(error && error.message ? error.message : error) }),
+      );
+    return true;
+  }
+
+  return false;
 });

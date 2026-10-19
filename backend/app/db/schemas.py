@@ -70,6 +70,8 @@ class Lead(RowModel):
     media_status: str = ""
     website_status: str = ""
     last_error: str = ""
+    profile_snapshot: str = ""
+    request_id: str = ""
     created_at: str = ""
     updated_at: str = ""
 

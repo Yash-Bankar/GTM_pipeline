@@ -15,11 +15,13 @@ from typing import Protocol
 
 from app import constants
 from app.ai import AIService, Evidence, build_evidence
+from app.ai.masking import mask_contact_patterns
 from app.ai.service import DossierResult
 from app.db.repository import Repository
 from app.db.schemas import Dossier, Lead, LeadPost, OutreachEntry, PipelineJob, WebsitePage
 from app.db.util import utc_now_iso
 from app.leads.validation import InvalidLeadInput
+from app.worker.snapshot import parse_snapshot, snapshot_has_data, snapshot_to_lead_fields
 from app.providers.errors import (
     AIConfigError,
     AIError,
@@ -54,6 +56,9 @@ class StageOutcome:
     result: str = ""
     error: str = ""
     retryable: bool = False
+    # When set, the job is re-queued without counting an attempt (dependency wait).
+    deferred: bool = False
+    defer_seconds: float = 30.0
 
 
 class ProfileFetcher(Protocol):
@@ -83,14 +88,31 @@ def _error_text(exc: BaseException) -> str:
 def _job_force(job: PipelineJob) -> bool:
     """True when the job payload asks the stage to bypass its idempotency guard.
 
-    Used by manual AI re-processing (`{"force": true}`) so an existing dossier /
-    outreach is regenerated rather than skipped.
+    Used by manual AI re-processing (`{"force": true}`) so an existing **dossier**
+    is regenerated. Drafts are always preserved regardless of this flag (T00).
     """
     try:
         payload = json.loads(job.payload or "{}")
     except ValueError:
         return False
     return bool(isinstance(payload, dict) and payload.get("force"))
+
+
+def _is_existing_draft(entry: OutreachEntry | None) -> bool:
+    """True when an outreach row already holds reviewed or authored content.
+
+    Any such draft must be preserved by normal reruns and retries; explicit
+    regeneration is unavailable until revision storage exists (PRD T00 / A28).
+    """
+    if entry is None:
+        return False
+    if (entry.status or "").upper() in constants.DRAFT_REVIEW_STATUSES:
+        return True
+    return bool(
+        (entry.subject or "").strip()
+        or (entry.body or "").strip()
+        or (entry.dm_body or "").strip()
+    )
 
 
 def _page_id(lead_id: str, url: str) -> str:
@@ -138,23 +160,97 @@ def _build_evidence(
     )
 
 
+# Evidence stages whose terminal state must be reached before AI runs (T06).
+_AI_EVIDENCE_DEPENDENCIES = (
+    constants.STAGE_PROFILE_MEDIA,
+    constants.STAGE_WEBSITE_ENRICH,
+)
+_OUTREACH_DEPENDENCIES = _AI_EVIDENCE_DEPENDENCIES + (constants.STAGE_AI_DOSSIER,)
+_TERMINAL_JOB_STATUSES = (constants.JOB_DONE, constants.JOB_ERROR)
+_DEPENDENCY_DEFER_SECONDS = 15.0
+
+
+def _pending_dependencies(repo: Repository, lead_id: str, stages: tuple[str, ...]) -> list[str]:
+    """Stages with a non-terminal job that must finish before proceeding.
+
+    A retry is not terminal, so it is treated as pending (PRD §5.4). An absent
+    job means the stage is not applicable and is not a dependency.
+    """
+    pending: list[str] = []
+    for stage in stages:
+        job = repo.find_job(stage, lead_id)
+        if job is not None and job.status not in _TERMINAL_JOB_STATUSES:
+            pending.append(stage)
+    return pending
+
+
 class ProfileFetchStage:
-    """Fetch a public Instagram profile and persist it on the lead (idempotent)."""
+    """Populate the lead from a captured snapshot, else fall back to HikerAPI.
+
+    A valid ``profile_snapshot`` fully bypasses HikerAPI (PRD T06). HikerAPI is
+    only called when no snapshot exists *and* credentials are configured; a
+    handle-only lead with no provider stays ``needs_data`` instead of silently
+    spending HikerAPI credits.
+    """
 
     name = constants.STAGE_PROFILE_FETCH
 
     def __init__(
         self,
-        client: ProfileFetcher,
+        client: ProfileFetcher | None,
         *,
         followup_max_attempts: int = 3,
         enable_ai: bool = False,
+        hiker_enabled: bool = True,
     ) -> None:
         self._client = client
         self._followup_max_attempts = followup_max_attempts
         self._enable_ai = enable_ai
+        self._hiker_enabled = bool(hiker_enabled and client is not None)
 
     def run(self, job: PipelineJob, repo: Repository) -> StageOutcome:
+        lead = repo.get_lead(job.lead_id)
+        if lead is None:
+            return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
+
+        snapshot = parse_snapshot(lead.profile_snapshot)
+        if snapshot_has_data(snapshot):
+            return self._apply_snapshot(repo, job, lead, snapshot)
+
+        if not self._hiker_enabled:
+            # No snapshot and no configured provider: do not call HikerAPI.
+            return StageOutcome(ok=True, result="no snapshot and no profile provider; needs data")
+
+        return self._fetch_with_hiker(repo, job)
+
+    def _apply_snapshot(
+        self, repo: Repository, job: PipelineJob, lead: Lead, snapshot: dict
+    ) -> StageOutcome:
+        fields = snapshot_to_lead_fields(snapshot)
+        fields["status"] = constants.LEAD_STATUS_ENRICHED
+        fields["last_error"] = ""
+        updated = repo.update_lead(job.lead_id, fields) or lead
+        self._enqueue_snapshot_followups(repo, job, updated)
+        urls = snapshot.get("external_urls") or []
+        logger.info(
+            "Enriched lead %s (@%s) from snapshot: followers=%s urls=%s",
+            job.lead_id,
+            updated.username,
+            fields.get("follower_count", ""),
+            len(urls),
+        )
+        return StageOutcome(
+            ok=True,
+            result=json.dumps(
+                {
+                    "source": "snapshot",
+                    "followers": fields.get("follower_count", 0),
+                    "externalUrls": len(urls),
+                }
+            ),
+        )
+
+    def _fetch_with_hiker(self, repo: Repository, job: PipelineJob) -> StageOutcome:
         username = job.username_normalized or job.username
         try:
             profile = self._client.fetch_profile(username)
@@ -192,6 +288,28 @@ class ProfileFetchStage:
             ),
         )
 
+    def _enqueue_snapshot_followups(
+        self, repo: Repository, job: PipelineJob, lead: Lead
+    ) -> None:
+        normalized = job.username_normalized or lead.username_normalized
+        if lead.external_url or lead.all_external_urls:
+            repo.enqueue(
+                constants.STAGE_WEBSITE_ENRICH,
+                job.lead_id,
+                lead.username,
+                normalized,
+                max_attempts=self._followup_max_attempts,
+            )
+        if self._enable_ai:
+            repo.enqueue(
+                constants.STAGE_AI_DOSSIER,
+                job.lead_id,
+                lead.username,
+                normalized,
+                max_attempts=self._followup_max_attempts,
+                priority=-1,
+            )
+
     def _enqueue_followups(self, repo: Repository, job: PipelineJob, profile: HikerProfile) -> None:
         normalized = job.username_normalized or profile.username
         if profile.instagram_id:
@@ -226,7 +344,7 @@ class ProfileMediaStage:
 
     name = constants.STAGE_PROFILE_MEDIA
 
-    def __init__(self, client: MediaFetcher, *, max_posts: int = 12, max_pages: int = 2) -> None:
+    def __init__(self, client: MediaFetcher | None, *, max_posts: int = 12, max_pages: int = 2) -> None:
         self._client = client
         self._max_posts = max_posts
         self._max_pages = max_pages
@@ -237,7 +355,7 @@ class ProfileMediaStage:
             return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
 
         instagram_id = (lead.instagram_id or "").strip()
-        if not instagram_id:
+        if not instagram_id or self._client is None:
             repo.update_lead(job.lead_id, {"media_status": constants.STAGE_STATUS_NONE, "last_error": ""})
             return StageOutcome(ok=True, result="no instagram id; media skipped")
 
@@ -319,7 +437,7 @@ class WebsiteEnrichStage:
                     resolved_url=page.resolved_url,
                     domain=page.domain,
                     title=page.title,
-                    text=page.text,
+                    text=mask_contact_patterns(page.text),
                     links=_serialize_links(page.links),
                     http_status=page.http_status,
                     status=page.status,
@@ -387,6 +505,15 @@ class AIDossierStage:
             and existing.status in (constants.AI_STATUS_NEEDS_REVIEW, "generated")
         ):
             return StageOutcome(ok=True, result="dossier already generated")
+
+        pending = _pending_dependencies(repo, job.lead_id, _AI_EVIDENCE_DEPENDENCIES)
+        if pending:
+            return StageOutcome(
+                ok=False,
+                deferred=True,
+                defer_seconds=_DEPENDENCY_DEFER_SECONDS,
+                result=f"waiting for evidence: {', '.join(pending)}",
+            )
 
         evidence = _build_evidence(
             repo, lead, max_posts=self._max_posts, max_pages=self._max_pages, text_chars=self._text_chars
@@ -482,12 +609,23 @@ class AIOutreachStage:
             return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
 
         existing = repo.get_outreach(job.lead_id)
-        if (
-            not _job_force(job)
-            and existing is not None
-            and existing.status == constants.AI_STATUS_NEEDS_REVIEW
-        ):
-            return StageOutcome(ok=True, result="outreach already generated")
+        if _is_existing_draft(existing):
+            if _job_force(job):
+                logger.warning(
+                    "Outreach regeneration requested for lead %s but revision storage "
+                    "is not available; preserving the existing draft.",
+                    job.lead_id,
+                )
+            return StageOutcome(ok=True, result="existing draft preserved")
+
+        pending = _pending_dependencies(repo, job.lead_id, _OUTREACH_DEPENDENCIES)
+        if pending:
+            return StageOutcome(
+                ok=False,
+                deferred=True,
+                defer_seconds=_DEPENDENCY_DEFER_SECONDS,
+                result=f"waiting for evidence: {', '.join(pending)}",
+            )
 
         dossier = repo.get_dossier(job.lead_id)
         if dossier is None or dossier.status in (constants.AI_STATUS_INSUFFICIENT, constants.AI_STATUS_ERROR):

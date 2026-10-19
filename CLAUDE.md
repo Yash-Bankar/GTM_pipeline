@@ -122,6 +122,14 @@ versions.
   (`recover_stale_jobs`).
 - The idle poll interval (`WORKER_POLL_INTERVAL`) is floored at **5s** in code;
   do not let the worker spin on an empty queue (Sheets quota).
+- **Snapshot-first (T06):** `profile_fetch` populates the lead from
+  `leads.profile_snapshot` and must **not** call HikerAPI when a usable snapshot
+  is present. Call HikerAPI only when the snapshot is absent *and* `HIKERAPI_KEY`
+  is set; otherwise leave the lead `needs_data` (never spend credits silently).
+- **Dependencies:** AI stages must wait for `profile_media`/`website_enrich` (and
+  `ai_dossier` for outreach) to reach terminal states; **defer** (re-queue without
+  counting an attempt) instead of retrying, so a temporary retry is not mistaken
+  for completed evidence.
 
 ## Enrichment stage rules (Phase 5)
 
@@ -157,6 +165,9 @@ versions.
   `NEEDS_REVIEW` output already exists).
 - Qualification scoring is deterministic from the rubric — compute it in code,
   not in the prompt.
+- **Mask contacts before approval (T06/A24):** normalize bio text and mask email/
+  phone patterns (`app.ai.masking`) in persisted evidence and AI inputs; never
+  populate `business_email`/`business_phone_number` from a snapshot.
 
 ## Dashboard rules (Phase 7)
 
@@ -179,12 +190,19 @@ versions.
 ## Extension rules (Phase 8)
 
 - Extension lives in `extension/` (MV3); reference in
-  [extension/README.md](extension/README.md).
-- Capture **only** the profile handle/URL — no bio/follower/media scraping.
+  [extension/README.md](extension/README.md) and
+  [extension-capture.md](docs/extension-capture.md).
+- Capture **only profile-scoped visible fields** (username, display name,
+  verification, bio, external links, counts) from the open profile — never
+  cookies, session tokens, private content, or follower lists. Missing values
+  stay unknown, never zero.
 - The extension talks **only** to the backend API (`POST /api/v1/leads`); never
   to the database or providers. No provider secrets in the extension.
+- Send a stable client-generated `request_id` per creator and nest snapshot data
+  under `profile_snapshot`; handle-only capture must keep working. There is no
+  bulk endpoint — submit one account per request and aggregate counts.
 - The API key is user-supplied and stored in `chrome.storage.local`; send it as
-  `x-api-key`. Surface clear created/duplicate/invalid/auth/network states.
+  `x-api-key`. Surface clear created/updated/duplicate/invalid/auth/network states.
 - Ignore repeated clicks while a request is in flight (disable the button).
 - Shared pure logic lives in `extension/lib.js` (UMD) so it is unit-testable
   under Node; keep browser-only chrome APIs out of it.

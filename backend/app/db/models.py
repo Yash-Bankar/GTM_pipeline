@@ -38,6 +38,10 @@ class Lead(Base):
     media_status: Mapped[str] = mapped_column(String(32), default="")
     website_status: Mapped[str] = mapped_column(String(32), default="")
     last_error: Mapped[str] = mapped_column(Text, default="")
+    # Capture intake (T04-lite): the latest sanitized extension snapshot as JSON,
+    # plus the client-generated request id used for idempotent retries.
+    profile_snapshot: Mapped[str] = mapped_column(Text, default="")
+    request_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     created_at: Mapped[str] = mapped_column(String(40), default="")
     updated_at: Mapped[str] = mapped_column(String(40), default="")
 

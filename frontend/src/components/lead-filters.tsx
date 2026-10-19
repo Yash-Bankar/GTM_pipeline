@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const STATUS_OPTIONS = ["", "queued", "enriched", "not_found", "error"];
+const STATUS_OPTIONS = ["", "needs_data", "queued", "running", "ready", "blocked"];
 
 export function LeadFilters({ q, status }: { q?: string; status?: string }) {
   return (
@@ -12,10 +12,10 @@ export function LeadFilters({ q, status }: { q?: string; status?: string }) {
         className="field sm:w-72"
         aria-label="Search leads"
       />
-      <select name="status" defaultValue={status ?? ""} className="field sm:w-44" aria-label="Filter by status">
+      <select name="status" defaultValue={status ?? ""} className="field sm:w-44" aria-label="Filter by progress">
         {STATUS_OPTIONS.map((option) => (
           <option key={option || "all"} value={option}>
-            {option ? option.replace(/_/g, " ") : "All statuses"}
+            {option ? option.replace(/_/g, " ") : "All progress"}
           </option>
         ))}
       </select>

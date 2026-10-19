@@ -1,5 +1,23 @@
 /** Types mirroring the Python API responses (snake_case). */
 
+export interface CountObservation {
+  value: number | null;
+  display: string;
+  precision: "exact" | "approximate" | "unknown" | string;
+}
+
+export interface ProfileSnapshot {
+  is_verified: boolean;
+  external_urls: string[];
+  followers: CountObservation | null;
+  following: CountObservation | null;
+  post_count: CountObservation | null;
+  source_url: string;
+  captured_at: string;
+  parser_version: string;
+  missing_fields: string[];
+}
+
 export interface Lead {
   lead_id: string;
   username: string;
@@ -24,6 +42,9 @@ export interface Lead {
   last_error: string;
   media_status: string;
   website_status: string;
+  progress: string;
+  progress_remedy: string;
+  snapshot: ProfileSnapshot | null;
 }
 
 export interface LeadList {
@@ -82,6 +103,8 @@ export interface Job {
 
 export interface LeadDetail {
   lead: Lead;
+  progress: string;
+  progress_remedy: string;
   posts: Post[];
   website_pages: WebsitePage[];
   jobs: Job[];
@@ -138,6 +161,7 @@ export interface OutreachList {
 export interface Stats {
   leads_total: number;
   leads_by_status: Record<string, number>;
+  leads_by_progress: Record<string, number>;
   jobs_by_status: Record<string, number>;
   dossiers_total: number;
   outreach_total: number;

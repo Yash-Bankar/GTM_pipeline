@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app import constants
+from app.config import get_settings
 from app.dashboard.schemas import (
     DossierListOut,
     DossierOut,
@@ -40,7 +42,11 @@ def lead_detail(
             detail=f"No lead with leadId '{lead_id}'.",
         )
     return LeadDetailOut(
-        lead=LeadResponse.from_lead(detail.lead),
+        lead=LeadResponse.from_lead(
+            detail.lead, progress=detail.progress, remedy=detail.progress_remedy
+        ),
+        progress=detail.progress,
+        progress_remedy=detail.progress_remedy,
         posts=[PostOut.from_model(post) for post in detail.posts],
         website_pages=[WebsitePageOut.from_model(page) for page in detail.website_pages],
         jobs=[JobOut.from_model(job) for job in detail.jobs],
@@ -66,7 +72,25 @@ def retry_ai(
     lead_id: str,
     service: DashboardService = Depends(get_dashboard_service),
 ) -> RetryAIOut:
-    """Re-queue the AI stages (dossier + outreach) only, forcing regeneration."""
+    """Re-queue the AI stages only (dossier + outreach).
+
+    Rejected with ``409 AI_UNAVAILABLE`` before enqueue when AI is disabled or the
+    Gemini key is missing (PRD T00 / A27). Existing reviewed drafts are preserved
+    by the outreach stage, never overwritten.
+    """
+    settings = get_settings()
+    if not (settings.ai_enabled and settings.gemini_api_key.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": constants.ERROR_AI_UNAVAILABLE,
+                "message": (
+                    "AI is unavailable. Set AI_ENABLED=true and configure "
+                    "GEMINI_API_KEY, then retry."
+                ),
+            },
+        )
+
     jobs = service.retry_ai(lead_id)
     if jobs is None:
         raise HTTPException(

@@ -2,13 +2,14 @@
 
 `backend/app/worker/` polls the **`pipeline_jobs`** table, claims one eligible
 job, runs its stage, persists progress, and repeats. It sends **no external
-messages** — only PostgreSQL reads/writes and (for now) HikerAPI profile
-fetches.
+messages** — only PostgreSQL reads/writes and provider fetches. HikerAPI is
+**optional**: a captured snapshot is processed without it (PRD T06).
 
 ```text
 backend/app/worker/
 ├─ main.py     Worker class + CLI + signal handling
-├─ pipeline.py Stages (Phase 4: profile_fetch) + StageOutcome
+├─ pipeline.py Stages + StageOutcome
+├─ snapshot.py Captured snapshot → lead fields (+ masking)
 ├─ __main__.py `python -m app.worker`
 └─ __init__.py exports
 ```
@@ -17,11 +18,28 @@ backend/app/worker/
 
 | Stage | What it does | Writes | Idempotency key |
 | --- | --- | --- | --- |
-| `profile_fetch` | HikerAPI profile → lead fields; enqueues the optional follow-ups | `leads` | `lead_id` |
+| `profile_fetch` | Snapshot → lead fields (else HikerAPI when configured); enqueues follow-ups | `leads` | `lead_id` |
 | `profile_media` | bounded recent posts/reels | `lead_posts`, lead `media_status` | `post_id` |
 | `website_enrich` | SSRF-safe crawl of external links | `website_pages`, lead `website_status` | `page_id` |
 | `ai_dossier` | Gemini dossier + qualification score | `dossiers` | `lead_id` |
 | `ai_outreach` | Gemini email/DM drafts (`NEEDS_REVIEW`) | `outreach_drafts` | `lead_id` |
+
+## Snapshot bypass and optional HikerAPI (T06)
+
+`profile_fetch` is **snapshot-first**:
+
+1. If the lead has a usable `profile_snapshot` (bio, external URLs, or a known
+   follower count), the stage populates `leads` from it and **never calls
+   HikerAPI**. Bio text is normalized and contact patterns (email/phone) are
+   masked; `business_email`/`business_phone_number` stay unpopulated before
+   manual fit approval (PRD A24). Snapshot external URLs enqueue `website_enrich`.
+2. With no snapshot, HikerAPI is called **only if `HIKERAPI_KEY` is set**.
+3. With no snapshot and no key, the job completes without enrichment and the lead
+   stays `needs_data` — the worker never silently spends HikerAPI credits.
+
+`profile_media`/`website_enrich` need no HikerAPI data: website research uses the
+snapshot's external URLs, and media is explicitly skipped (`media_status=none`)
+when no Instagram id is known.
 
 `profile_fetch` enqueues `profile_media` (when an Instagram id is known) and
 `website_enrich` (when the profile has links). The media/website stages are
@@ -33,6 +51,13 @@ When AI is enabled, `profile_fetch` also enqueues `ai_dossier` (low priority so
 evidence is gathered first), and `ai_dossier` enqueues `ai_outreach`. Both are
 idempotent and store `NEEDS_REVIEW` outputs; nothing is sent. See
 [gemini.md](gemini.md).
+
+**Dependency-aware scheduling:** `ai_dossier` and `ai_outreach` do not run until
+their required evidence stages (`profile_media`, `website_enrich`, and for
+outreach `ai_dossier`) reach a **terminal** state (`done`/`error`). While a
+dependency is queued/running/retrying, the AI job is **deferred** — re-queued via
+`run_after` without counting a failed attempt — so a temporary retry is never
+mistaken for completed evidence (PRD §5.4).
 
 **Manual AI re-processing:** `POST /api/v1/leads/{id}/retry-ai` re-queues
 `ai_dossier` (priority 10) and `ai_outreach` (priority 5) with a
@@ -64,6 +89,8 @@ Columns: `job_id` (PK), `stage`, `lead_id`, `username`, `username_normalized`,
    - **retryable error** (rate limit, quota, network, bad payload) → job `retry`
      with exponential `run_after`, until `max_attempts` is reached, then `error`.
    - **terminal error** (not found, auth/config, invalid input) → job `error`.
+   - **deferred** (dependency not terminal) → job re-queued with `run_after`,
+     `attempt_count` unchanged.
 4. The worker continues until no work remains (or is stopped).
 
 ## Reliability
@@ -120,14 +147,15 @@ enforced so an idle worker does not spin), `WORKER_STALE_MINUTES`,
 ## Tests
 
 ```powershell
-.\backend\.venv\Scripts\python.exe -m pytest tests\test_jobs_store.py tests\test_worker_pipeline.py tests\test_worker_loop.py tests\test_worker_stages_media_website.py
+.\backend\.venv\Scripts\python.exe -m pytest tests\test_jobs_store.py tests\test_worker_pipeline.py tests\test_worker_loop.py tests\test_worker_stages_media_website.py tests\test_worker_snapshot.py
 ```
 
 Coverage: enqueue/dedupe, claim, run-after gating, complete/fail with bounded
 retries, stale-job recovery, successful profile fetch, not-found (terminal),
 quota (retryable), idempotent re-run, unknown stage, drain/max-jobs, graceful
 shutdown, restart recovery, media storage/dedupe/skip, website partial/blocked/
-missing, and downstream enqueue.
+missing, downstream enqueue, snapshot bypass, optional HikerAPI fallback,
+contact masking, and dependency-aware deferral.
 
 ## Out of scope (Phase 5)
 

@@ -11,13 +11,30 @@ import {
   KeyValue,
   PageHeader,
   StatusBadge,
+  VerifiedBadge,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
-import { formatNumber, humanize } from "@/lib/format";
+import { formatCount, followerLabel, formatNumber, humanize, splitUrls } from "@/lib/format";
 import { requireSession } from "@/lib/session";
 
 type Params = Promise<{ leadId: string }>;
+
+function postsEmptyCopy(mediaStatus: string): { title: string; description: string } {
+  switch ((mediaStatus || "").toLowerCase()) {
+    case "error":
+      return { title: "Posts unavailable", description: "Media enrichment failed for this creator." };
+    case "blocked":
+      return { title: "Posts blocked", description: "The media source rejected the request." };
+    case "partial":
+      return { title: "Posts partially captured", description: "Media enrichment returned incomplete data." };
+    default:
+      return {
+        title: "Posts not captured in snapshot",
+        description: "Recent posts aren't part of the profile snapshot. Run media enrichment to fetch them.",
+      };
+  }
+}
 
 export default async function LeadDetailPage({ params }: { params: Params }) {
   await requireSession();
@@ -31,15 +48,24 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
     throw error;
   }
 
-  const { lead, posts, website_pages: pages, jobs } = detail;
+  const { lead, progress, progress_remedy: remedy, posts, website_pages: pages, jobs } = detail;
+  const snapshot = lead.snapshot;
+  const links = splitUrls(lead.all_external_urls);
+  const postsEmpty = postsEmptyCopy(lead.media_status);
 
   return (
     <>
       <PageHeader
-        title={`@${lead.username}`}
+        title={
+          <span className="inline-flex items-center gap-2">
+            @{lead.username}
+            {snapshot?.is_verified ? <VerifiedBadge /> : null}
+          </span>
+        }
         description={lead.full_name || lead.business_category_name || "Creator profile"}
         actions={
           <div className="flex items-center gap-3">
+            <StatusBadge status={progress} />
             <Link
               href={`/dossiers/${lead.lead_id}`}
               className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-semibold text-mist-200 hover:bg-ink-800"
@@ -56,41 +82,77 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
         }
       />
 
+      {progress === "blocked" && remedy ? (
+        <div
+          role="alert"
+          className="mb-5 flex items-start gap-3 rounded-xl border border-rose-alert/40 bg-rose-alert/10 px-4 py-3 text-sm text-rose-alert"
+        >
+          <span aria-hidden>⚠</span>
+          <span>{remedy}</span>
+        </div>
+      ) : null}
+
       <div className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">
         <div className="space-y-5">
           <Card>
             <CardHeader
               title="Profile"
-              subtitle={lead.profile_url}
-              actions={<StatusBadge status={lead.status} />}
+              subtitle={snapshot?.source_url || lead.profile_url}
+              actions={<StatusBadge status={progress} />}
             />
             <dl className="grid grid-cols-2 gap-4 px-5 py-4 sm:grid-cols-3">
-              <KeyValue label="Followers">{formatNumber(lead.follower_count)}</KeyValue>
-              <KeyValue label="Following">{formatNumber(lead.follows_count)}</KeyValue>
+              <KeyValue label="Followers">{followerLabel(lead)}</KeyValue>
+              <KeyValue label="Following">
+                {snapshot?.following ? formatCount(snapshot.following) : formatNumber(lead.follows_count)}
+              </KeyValue>
+              <KeyValue label="Posts">
+                {snapshot?.post_count ? formatCount(snapshot.post_count) : "Unknown"}
+              </KeyValue>
               <KeyValue label="Category">{lead.business_category_name || "—"}</KeyValue>
               <KeyValue label="Email">{lead.business_email || "—"}</KeyValue>
               <KeyValue label="Phone">{lead.business_phone_number || "—"}</KeyValue>
-              <KeyValue label="Engagement">{lead.engagement_rate || "—"}</KeyValue>
             </dl>
-            {lead.bio ? (
-              <p className="border-t border-ink-800 px-5 py-4 text-sm leading-relaxed text-mist-200">
-                {lead.bio}
+            {snapshot && snapshot.missing_fields.length > 0 ? (
+              <p className="border-t border-ink-800 px-5 py-3 text-xs text-amber-glow">
+                Missing: {snapshot.missing_fields.join(", ")}
               </p>
             ) : null}
-            {lead.external_url ? (
-              <p className="border-t border-ink-800 px-5 py-3 text-xs text-mist-400">
-                Website:{" "}
-                <a href={lead.external_url} target="_blank" rel="noreferrer" className="text-accent-300 hover:underline">
-                  {lead.external_url}
-                </a>
+            <div className="border-t border-ink-800 px-5 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-mist-400">Bio</p>
+              <p className="mt-1 text-sm leading-relaxed text-mist-200">
+                {lead.bio || "No bio captured."}
               </p>
-            ) : null}
+            </div>
+            <div className="border-t border-ink-800 px-5 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-mist-400">Links</p>
+              {links.length > 0 ? (
+                <ul className="mt-1 space-y-1">
+                  {links.map((url) => (
+                    <li key={url}>
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="break-all text-sm text-accent-300 hover:underline"
+                      >
+                        {url}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm text-mist-400">No external links captured.</p>
+              )}
+            </div>
           </Card>
 
           <Card>
-            <CardHeader title="Recent posts" subtitle={`${posts.length} stored`} />
+            <CardHeader
+              title="Recent posts"
+              subtitle={posts.length > 0 ? `${posts.length} stored` : postsEmpty.title}
+            />
             {posts.length === 0 ? (
-              <EmptyState title="No posts collected" description="Media may still be processing." />
+              <EmptyState title={postsEmpty.title} description={postsEmpty.description} />
             ) : (
               <ul className="divide-y divide-ink-800">
                 {posts.map((post) => (
@@ -153,6 +215,10 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
           <Card>
             <CardHeader title="Processing" subtitle="Re-run stages manually" />
             <div className="space-y-3 px-5 py-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-mist-400">Research</span>
+                <StatusBadge status={progress} />
+              </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-mist-400">Media</span>
                 <StatusBadge status={lead.media_status || "none"} />

@@ -59,26 +59,51 @@ def test_retry_lead(api_client, seeded) -> None:
     assert response.json()["stage"] == "profile_fetch"
 
 
-def test_retry_ai_enqueues_only_ai_jobs(api_client, seeded, repo: Repository) -> None:
+def test_retry_ai_enqueues_only_ai_jobs(api_client, seeded, repo: Repository, monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    try:
+        response = api_client.post(f"/api/v1/leads/{seeded.lead_id}/retry-ai")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["lead_id"] == seeded.lead_id
+        assert {job["stage"] for job in body["jobs"]} == {"ai_dossier", "ai_outreach"}
+
+        # AI jobs are re-queued with a force flag...
+        dossier_job = repo.find_job("ai_dossier", seeded.lead_id)
+        assert dossier_job.status == "queued"
+        assert json.loads(dossier_job.payload)["force"] is True
+
+        # ...and the completed profile/media stages are left untouched.
+        profile_job = repo.find_job("profile_fetch", seeded.lead_id)
+        assert profile_job is not None
+        assert json.loads(profile_job.payload or "{}") == {}
+    finally:
+        get_settings.cache_clear()
+
+
+def test_retry_ai_without_ai_returns_409(api_client, seeded, repo: Repository) -> None:
+    """AI disabled / key absent → 409 AI_UNAVAILABLE before any job is created."""
+    before = repo.find_job("ai_dossier", seeded.lead_id)
+    assert before is None
+
     response = api_client.post(f"/api/v1/leads/{seeded.lead_id}/retry-ai")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["lead_id"] == seeded.lead_id
-    assert {job["stage"] for job in body["jobs"]} == {"ai_dossier", "ai_outreach"}
 
-    # AI jobs are re-queued with a force flag...
-    dossier_job = repo.find_job("ai_dossier", seeded.lead_id)
-    assert dossier_job.status == "queued"
-    assert json.loads(dossier_job.payload)["force"] is True
-
-    # ...and the completed profile/media stages are left untouched.
-    profile_job = repo.find_job("profile_fetch", seeded.lead_id)
-    assert profile_job is not None
-    assert json.loads(profile_job.payload or "{}") == {}
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "AI_UNAVAILABLE"
+    assert "GEMINI_API_KEY" in detail["message"]
+    # No job was created for the rejected request.
+    assert repo.find_job("ai_dossier", seeded.lead_id) is None
 
 
-def test_retry_ai_missing_lead_returns_404(api_client) -> None:
-    assert api_client.post("/api/v1/leads/ld_nope/retry-ai").status_code == 404
+def test_retry_ai_missing_lead_returns_404(api_client, monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    try:
+        assert api_client.post("/api/v1/leads/ld_nope/retry-ai").status_code == 404
+    finally:
+        get_settings.cache_clear()
 
 
 def test_list_and_get_dossier(api_client, seeded) -> None:
