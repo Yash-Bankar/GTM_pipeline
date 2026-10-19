@@ -42,6 +42,10 @@ class Lead(Base):
     # plus the client-generated request id used for idempotent retries.
     profile_snapshot: Mapped[str] = mapped_column(Text, default="")
     request_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # Fit-decision dimension (PRD T08). Independent of research progress.
+    fit_status: Mapped[str] = mapped_column(String(32), default="not_reviewed", index=True)
+    fit_note: Mapped[str] = mapped_column(Text, default="")
+    fit_decided_at: Mapped[str] = mapped_column(String(40), default="")
     created_at: Mapped[str] = mapped_column(String(40), default="")
     updated_at: Mapped[str] = mapped_column(String(40), default="")
 
@@ -189,3 +193,49 @@ class PipelineJob(Base):
     updated_at: Mapped[str] = mapped_column(String(40), default="")
 
     lead: Mapped["Lead"] = relationship(back_populates="jobs")
+
+
+class ContactRequest(Base):
+    """An explicit post-approval request to find public contact details (T08)."""
+
+    __tablename__ = "contact_requests"
+
+    request_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="requested", index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    requested_at: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    updated_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class OutreachRevision(Base):
+    """An explicit draft request; one row per request preserves history (T08)."""
+
+    __tablename__ = "outreach_revisions"
+
+    revision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    channel: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(32), default="requested", index=True)
+    subject: Mapped[str] = mapped_column(Text, default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    dm_body: Mapped[str] = mapped_column(Text, default="")
+    requested_at: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    updated_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class WorkerHeartbeat(Base):
+    """Single-row worker liveness marker used by the readiness endpoint (T09)."""
+
+    __tablename__ = "worker_heartbeat"
+
+    heartbeat_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    worker_id: Mapped[str] = mapped_column(String(64), default="")
+    beat_at: Mapped[str] = mapped_column(String(40), default="", index=True)
+    updated_at: Mapped[str] = mapped_column(String(40), default="")

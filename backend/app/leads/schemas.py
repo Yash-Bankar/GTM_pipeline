@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -159,6 +160,9 @@ class LeadResponse(BaseModel):
     progress: str = "needs_data"
     progress_remedy: str = ""
     snapshot: ProfileSnapshotOut | None = None
+    fit_status: str = "not_reviewed"
+    fit_note: str = ""
+    fit_decided_at: str = ""
 
     @classmethod
     def from_lead(
@@ -191,6 +195,9 @@ class LeadResponse(BaseModel):
             progress=progress,
             progress_remedy=remedy,
             snapshot=parse_snapshot_out(lead.profile_snapshot),
+            fit_status=lead.fit_status or "not_reviewed",
+            fit_note=lead.fit_note,
+            fit_decided_at=lead.fit_decided_at,
         )
 
 
@@ -215,3 +222,79 @@ class LeadListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class FitDecisionRequest(BaseModel):
+    """Manual fit decision (T08). A rejection requires a note."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["approve", "reject", "need_evidence"]
+    note: str = Field(default="", max_length=2000)
+
+
+class ContactRequestCreate(BaseModel):
+    """Optional note for an explicit contact request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: str = Field(default="", max_length=2000)
+
+
+class DraftRequestCreate(BaseModel):
+    """Explicit draft request with a channel (T08)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: Literal["email", "instagram_dm"]
+
+
+class ContactRequestOut(BaseModel):
+    request_id: str
+    lead_id: str
+    status: str
+    note: str
+    requested_at: str
+    created_at: str
+
+    @classmethod
+    def from_model(cls, request) -> "ContactRequestOut":
+        return cls(
+            request_id=request.request_id,
+            lead_id=request.lead_id,
+            status=request.status,
+            note=request.note,
+            requested_at=request.requested_at,
+            created_at=request.created_at,
+        )
+
+
+class OutreachRevisionOut(BaseModel):
+    revision_id: str
+    lead_id: str
+    channel: str
+    status: str
+    subject: str
+    body: str
+    dm_body: str
+    requested_at: str
+    created_at: str
+
+    @classmethod
+    def from_model(cls, revision) -> "OutreachRevisionOut":
+        return cls(
+            revision_id=revision.revision_id,
+            lead_id=revision.lead_id,
+            channel=revision.channel,
+            status=revision.status,
+            subject=revision.subject,
+            body=revision.body,
+            dm_body=revision.dm_body,
+            requested_at=revision.requested_at,
+            created_at=revision.created_at,
+        )
+
+
+class OutreachRevisionListOut(BaseModel):
+    items: list[OutreachRevisionOut]
+    total: int

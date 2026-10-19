@@ -10,11 +10,15 @@ import { ApiError } from "./errors";
 import type {
   Dossier,
   DossierList,
+  IntegrationsStatus,
+  Lead,
   LeadDetail,
   LeadList,
   LeadSubmission,
   Outreach,
   OutreachList,
+  OutreachRevision,
+  OutreachRevisionList,
   RetryAiResult,
   Stats,
 } from "./types";
@@ -81,6 +85,40 @@ export const api = {
 
   leadDetail(leadId: string) {
     return request<LeadDetail>(`/api/v1/leads/${encodeURIComponent(leadId)}/detail`);
+  },
+
+  decideFit(
+    leadId: string,
+    body: { action: "approve" | "reject" | "need_evidence"; note?: string },
+  ) {
+    return request<Lead>(`/api/v1/leads/${encodeURIComponent(leadId)}/fit`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  requestContact(leadId: string, note = "") {
+    return request<unknown>(`/api/v1/leads/${encodeURIComponent(leadId)}/contact-requests`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  },
+
+  requestDraft(leadId: string, channel: "email" | "instagram_dm") {
+    return request<OutreachRevision>(`/api/v1/leads/${encodeURIComponent(leadId)}/draft-requests`, {
+      method: "POST",
+      body: JSON.stringify({ channel }),
+    });
+  },
+
+  listDraftRevisions(leadId: string) {
+    return request<OutreachRevisionList>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/draft-requests`,
+    );
+  },
+
+  integrationsStatus() {
+    return request<IntegrationsStatus>("/api/v1/integrations/status");
   },
 
   retryLead(leadId: string) {

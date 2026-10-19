@@ -64,3 +64,28 @@ DRAFT_REVIEW_STATUSES = (AI_STATUS_NEEDS_REVIEW, "APPROVED", "REJECTED")
 
 # Stable error code returned when an AI action is requested but AI is unavailable.
 ERROR_AI_UNAVAILABLE = "AI_UNAVAILABLE"
+
+# Fit-decision dimension (PRD §10). Separate from research progress and drafts.
+FIT_STATUS_NOT_REVIEWED = "not_reviewed"
+FIT_STATUS_APPROVED = "approved"
+FIT_STATUS_REJECTED = "rejected"
+FIT_STATUS_NEEDS_EVIDENCE = "needs_evidence"
+FIT_STATUSES = (
+    FIT_STATUS_NOT_REVIEWED,
+    FIT_STATUS_APPROVED,
+    FIT_STATUS_REJECTED,
+    FIT_STATUS_NEEDS_EVIDENCE,
+)
+# Action -> stored fit status (reject requires a note, enforced in the service).
+FIT_ACTIONS = {
+    "approve": FIT_STATUS_APPROVED,
+    "reject": FIT_STATUS_REJECTED,
+    "need_evidence": FIT_STATUS_NEEDS_EVIDENCE,
+}
+
+# Draft channels accepted by explicit draft requests.
+DRAFT_CHANNELS = ("email", "instagram_dm")
+
+# A worker heartbeat older than this is reported as stale (PRD T09).
+WORKER_STALE_SECONDS = 60
+WORKER_HEARTBEAT_ID = "worker"

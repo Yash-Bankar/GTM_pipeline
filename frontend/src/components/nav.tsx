@@ -10,6 +10,7 @@ export const NAV_LINKS = [
   { href: "/leads", label: "Leads", glyph: "◎", hint: "Pipeline & enrichment" },
   { href: "/dossiers", label: "Dossiers", glyph: "❖", hint: "AI research" },
   { href: "/outreach", label: "Outreach", glyph: "✉", hint: "Draft review" },
+  { href: "/settings", label: "Settings", glyph: "⚙", hint: "System health" },
 ];
 
 export function Nav() {

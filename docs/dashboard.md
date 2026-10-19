@@ -43,11 +43,12 @@ SESSION_SECRET=                      # optional HMAC secret for the session cook
 | Route | What it shows |
 | --- | --- |
 | `/leads` | Searchable, filterable leads table; verified badge; follower precision; add-lead form; pipeline stats |
-| `/leads/[leadId]` | Profile snapshot (verified badge, bio, links, follower precision, missing fields), recent posts, website pages, job history; re-queue processing or **re-process AI jobs only** |
+| `/leads/[leadId]` | Profile snapshot (verified badge, bio, links, follower precision, missing fields), recent posts, website pages, job history, **fit decision**, **contact/draft gates**, and **draft revision history**; re-queue processing or **re-process AI jobs only** |
 | `/dossiers` | Dossier list with qualification score/tier; visible **Search creators** label |
 | `/dossiers/[leadId]` | Structured AI findings, criterion scores, cited sources, uncertainty |
 | `/outreach` | Draft list with a visible **Draft status** filter |
 | `/outreach/[leadId]` | Editable email + DM draft with Approve / Reject (nothing is sent) |
+| `/settings` | System health: worker heartbeat, database, Gemini/HikerAPI readiness, pipeline rules |
 
 Navigation is a sidebar at `lg+` and a visible compact top bar below `lg` (no
 hover-only menus); section links expose `aria-current`. Snapshot-only leads show

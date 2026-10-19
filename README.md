@@ -5,18 +5,20 @@ discovery. Capture creator handles, enrich them with public Instagram + website
 data, generate AI dossiers and personalized outreach, and manage everything from
 a Next.js console — with **PostgreSQL as the single source of truth**.
 
-> **Status: v1.1 redesign implemented.** The pipeline is **snapshot-first**: the
+> **Status: v1.1 redesign complete (T00–T10), ready for production cutover.**
+> The pipeline is **snapshot-first**: the
 > Chrome extension captures a public DOM snapshot so a lead can be processed
 > **without HikerAPI**, HikerAPI remains an explicitly configured optional
-> provider, and the console shows verified badges, precision-aware counts, and
-> honest progress. Lead capture, the autonomous worker, website research,
-> Gemini dossiers/outreach, the Next.js console, the extension, and the
-> container deployment are implemented. PostgreSQL (SQLAlchemy + Alembic) is the
-> single source of truth.
+> provider, and the console shows verified badges, precision-aware counts, honest
+> progress, server-enforced **fit approval**, and a **Mission Control**
+> readiness view. Lead capture, the autonomous worker, website research, Gemini
+> dossiers/outreach, the Next.js console, the extension, and the container
+> deployment are implemented. PostgreSQL (SQLAlchemy + Alembic) is the single
+> source of truth.
 >
 > See [IMPLEMENTATION_REPORT_v1.1.md](IMPLEMENTATION_REPORT_v1.1.md) for the
-> as-built mapping against the redesign PRD (T00–T07), including intentional
-> deviations.
+> as-built mapping against the redesign PRD (T00–T10), verification results,
+> intentional deviations, and the auditor checklist.
 
 ---
 
@@ -40,7 +42,8 @@ Synpo GTM is a small, opinionated stack:
   outreach drafts, and the job queue. Schema is managed by **Alembic**.
 - **Next.js GTM Console** (`:3000`) — leads table, lead detail, dossiers, and
   outreach review (approve/reject), with an Aurora background and glass panels.
-  Shows verified badges, precision-aware counts, and explicit missing fields.
+  Shows verified badges, precision-aware counts, explicit missing fields, manual
+  **fit approval**, and a **Mission Control** (`/settings`) readiness view.
 - **Google Gemini** — structured dossiers + qualification scoring and email/DM
   outreach drafts (review-only; nothing is sent). Reviewed drafts are never
   overwritten by a rerun.
@@ -124,6 +127,14 @@ Synpo GTM is a small, opinionated stack:
 - **Truthful progress** — research state is derived from persisted jobs, so a
   terminal failure shows as **blocked** (with a remedy) instead of a misleading
   "Queued". List rows, filters, detail, and counters agree.
+- **Fit approval & gated actions** — operators record **Approve Fit**,
+  **Need Evidence**, or **Reject** (rejection requires a note). Contact and draft
+  requests are **server-enforced** on an approved fit (HTTP 403 otherwise), and
+  every draft request appends a revision to `outreach_revisions` for history.
+- **Mission Control (Settings)** — a secret-free readiness page reports database
+  health, the worker heartbeat (`active`/`stale`/`stopped`) with the last beat
+  time, Gemini/HikerAPI `configured`/`disabled`, and the active pipeline rules.
+  The worker touches a heartbeat every poll cycle; it is stale after 60s.
 - **Next.js GTM Console** — searchable/filterable leads table, lead detail with
   verified badges, precision-aware counts (`~472K` or `Unknown`), explicit
   missing fields, snapshot links, posts/website evidence, and job history; plus
@@ -217,6 +228,7 @@ docker compose --profile frontend up --build
 ```
 
 - Dashboard: <http://localhost:3000>
+- Mission Control (readiness): <http://localhost:3000/settings>
 - API + docs: <http://localhost:8000> (`/health`, `/docs`)
 - PostgreSQL: `localhost:5432`
 
@@ -290,7 +302,7 @@ docker compose down -v                 # stop and DELETE data
 - [docs/extension-capture.md](docs/extension-capture.md) — DOM snapshot feasibility
 - [docs/deployment.md](docs/deployment.md) — containers, production, Kubernetes
 - [docs/runbook.md](docs/runbook.md) — end-to-end verification runbook
-- [IMPLEMENTATION_REPORT_v1.1.md](IMPLEMENTATION_REPORT_v1.1.md) — as-built PRD (T00–T07)
+- [IMPLEMENTATION_REPORT_v1.1.md](IMPLEMENTATION_REPORT_v1.1.md) — as-built PRD (T00–T10)
 - [DEPLOYMENT_ORACLE.md](DEPLOYMENT_ORACLE.md) — Oracle Cloud (OCI) deployment
 - [extension/README.md](extension/README.md) — Chrome extension
 

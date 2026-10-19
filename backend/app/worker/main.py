@@ -77,6 +77,14 @@ class Worker:
             logger.info("Recovered %s stale job(s) from a previous run", recovered)
         return recovered
 
+    def _touch_heartbeat(self) -> None:
+        """Record liveness for the readiness endpoint (T09). Never fatal."""
+        try:
+            with self._session_factory() as session:
+                Repository(session).touch_heartbeat(self._worker_id)
+        except Exception:  # noqa: BLE001 - a heartbeat failure must not stop work
+            logger.warning("Could not update the worker heartbeat", exc_info=True)
+
     def run(
         self,
         *,
@@ -93,6 +101,7 @@ class Worker:
             if max_jobs is not None and processed >= max_jobs:
                 break
 
+            self._touch_heartbeat()
             with self._session_factory() as session:
                 job = Repository(session).claim_next(worker_id=self._worker_id)
             if job is None:
@@ -103,6 +112,7 @@ class Worker:
                 continue
 
             self.run_job(job)
+            self._touch_heartbeat()
             processed += 1
 
         return processed

@@ -165,6 +165,7 @@ API_KEY=<long-random-secret>
 CORS_ALLOW_ORIGINS=https://your-domain.com,chrome-extension://<extension-id>
 
 # Worker
+# Keep WORKER_POLL_INTERVAL <= 60 so /integrations/status reports "active".
 WORKER_POLL_INTERVAL=30
 WORKER_STALE_MINUTES=30
 ```
@@ -338,12 +339,23 @@ Expected tables:
 
 ```text
  alembic_version
+ contact_requests
  dossiers
  lead_posts
  leads
  outreach_drafts
+ outreach_revisions
  pipeline_jobs
  website_pages
+ worker_heartbeat
+```
+
+The current migration head is `b2c3d4e5f6a7` (adds fit-decision columns,
+`contact_requests`, `outreach_revisions`, and `worker_heartbeat`). Confirm with:
+
+```bash
+docker compose exec db psql -U postgres -d synpo \
+  -c "select version_num from alembic_version;"
 ```
 
 The Postgres container is named **`synpo-gtm-automation-db-1`** (project folder
@@ -380,8 +392,39 @@ docker compose logs --tail=100 frontend
 - **Chrome extension:** popup → **Settings**:
   - **API base URL:** `https://api.your-domain.com`
   - **API key:** the same value as `API_KEY`
-  Then open an Instagram profile and click **Add to GTM**; the lead appears in
-  the console.
+   Then open an Instagram profile and click **Add to GTM**; the lead appears in
+   the console.
+
+### 5.4 Readiness and worker heartbeat (T09)
+
+The worker upserts a single `worker_heartbeat` row every poll cycle. The
+authenticated readiness endpoint reports health without exposing secrets:
+
+```bash
+curl -s -H "x-api-key: $API_KEY" \
+  https://api.your-domain.com/api/v1/integrations/status
+
+# {"database":"healthy","worker":"active","gemini":"configured",
+#  "hikerapi":"configured","worker_last_beat_at":"2026-10-19T18:28:36+00:00"}
+```
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `database` | `healthy` / `unreachable` | `SELECT 1` succeeded / failed |
+| `worker` | `active` / `stale` / `stopped` | heartbeat ≤60s / older than 60s / no heartbeat |
+| `worker_last_beat_at` | ISO timestamp | last recorded heartbeat |
+| `gemini` | `configured` / `disabled` | `AI_ENABLED` and `GEMINI_API_KEY` |
+| `hikerapi` | `configured` / `disabled` | `HIKERAPI_KEY` set |
+
+The console **Settings** (`/settings`) page renders the same values.
+
+**No new environment variables are required.** The heartbeat is stored in
+PostgreSQL. Keep `WORKER_POLL_INTERVAL` at or below **60 seconds** (default
+`30`) so the worker reports `active` between polls; a larger interval will show
+`stale` between cycles. If the worker is `stopped`/`stale`, check
+`docker compose ps` and `docker compose logs worker`, then
+`docker compose restart worker`. `gemini=disabled`/`hikerapi=disabled` only means
+the optional credential is unset; snapshot-only capture still works.
 
 ---
 
@@ -485,7 +528,10 @@ docker system df               # review usage
 | Console returns 401 | `BACKEND_API_KEY` in `frontend/.env.local` ≠ `API_KEY` |
 | Extension can't reach API | API base URL must be `https://…`; CORS must include the extension origin |
 | Caddy/Nginx can't get certs | DNS not pointing at the instance, or port 80 blocked |
-| Worker idle / no jobs | no queued jobs, or `HIKERAPI_KEY` unset |
+| Worker idle / no jobs | no queued jobs; `HIKERAPI_KEY` is optional (snapshot leads need no key) |
+| `/settings` shows worker **stale**/**stopped** | worker not running, or `WORKER_POLL_INTERVAL` > 60 → `docker compose ps`, `docker compose logs worker`, `docker compose restart worker` |
+| `/settings` shows Gemini/HikerAPI **disabled** | optional credential unset; snapshot-only capture and manual review still work |
+| `contact-requests`/`draft-requests` return `403` | `fit_status` is not `approved`; record an Approve Fit decision first |
 
 ---
 
@@ -504,5 +550,6 @@ docker compose --profile frontend up -d --build
 docker compose exec api alembic upgrade head
 # 6) Verify
 curl -s https://api.your-domain.com/health
+curl -s -H "x-api-key: $API_KEY" https://api.your-domain.com/api/v1/integrations/status
 docker compose ps
 ```

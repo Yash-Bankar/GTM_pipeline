@@ -99,6 +99,69 @@ Response: `{ "items": [...], "total": 12, "limit": 50, "offset": 0 }`, newest fi
 
 Fetch one lead by its stable `leadId`. `404` if not found.
 
+### `PATCH /api/v1/leads/{lead_id}/fit` (T08)
+
+Record the operator's manual fit decision. Separate from research progress.
+
+```json
+{ "action": "approve", "note": "Strong finance fit" }
+```
+
+- `action`: `approve` | `reject` | `need_evidence`.
+- `note`: optional except for `reject`, which requires a non-empty note (`422`).
+- Stores `fit_status` (`approved`/`rejected`/`needs_evidence`), `fit_note`, and a
+  server `fit_decided_at` timestamp. Returns the updated lead; `404` if missing.
+
+### `POST /api/v1/leads/{lead_id}/contact-requests` (T08)
+
+Queue an explicit request to find public contact details. **Requires
+`fit_status == "approved"`**; otherwise returns `403` with
+`{"code": "FIT_APPROVAL_REQUIRED", "fit_status": ...}`. Body is optional:
+`{ "note": "..." }`. Returns `201` with the stored request.
+
+### `POST /api/v1/leads/{lead_id}/draft-requests` (T08)
+
+Request a new outreach draft revision. **Requires `fit_status == "approved"`**
+(else `403`). Body:
+
+```json
+{ "channel": "email" }
+```
+
+- `channel`: `email` | `instagram_dm` (anything else is `422`).
+- Creates a **new row** in `outreach_revisions` (history is preserved; repeated
+  requests create new revisions). Returns `201` with the revision.
+
+### `GET /api/v1/integrations/status` (T09)
+
+Secret-free readiness snapshot (authenticated like the rest of the API):
+
+```json
+{
+  "database": "healthy",
+  "worker": "active",
+  "gemini": "configured",
+  "hikerapi": "disabled",
+  "worker_last_beat_at": "2026-10-19T10:20:00+00:00"
+}
+```
+
+- `database`: `healthy` | `unreachable`.
+- `worker`: `active` | `stale` | `stopped` — based on the worker heartbeat;
+  stale when older than 60 seconds.
+- `worker_last_beat_at`: the last recorded heartbeat timestamp (empty when none).
+- `gemini` / `hikerapi`: `configured` | `disabled` (credential values are never
+  returned).
+
+### `GET /api/v1/leads/{lead_id}/draft-requests` (T08)
+
+List the outreach draft revision history for a lead, oldest first:
+`{ "items": [ ... ], "total": 2 }`. `404` for a missing lead.
+
+### `GET /api/v1/leads/{lead_id}/detail`
+
+Dashboard detail (lead, derived progress, posts, website pages, jobs).
+
 ## Behavior
 
 - **Validation**: accepts bare handles or `instagram.com` URLs; rejects other

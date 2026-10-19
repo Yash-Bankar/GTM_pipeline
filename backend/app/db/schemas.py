@@ -14,13 +14,16 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from .util import normalize_username  # re-exported for callers
 
 __all__ = [
+    "ContactRequest",
     "Dossier",
     "Lead",
     "LeadPost",
     "OutreachEntry",
+    "OutreachRevision",
     "PipelineJob",
     "RowModel",
     "WebsitePage",
+    "WorkerHeartbeat",
     "normalize_username",
 ]
 
@@ -72,6 +75,9 @@ class Lead(RowModel):
     last_error: str = ""
     profile_snapshot: str = ""
     request_id: str = ""
+    fit_status: str = "not_reviewed"
+    fit_note: str = ""
+    fit_decided_at: str = ""
     created_at: str = ""
     updated_at: str = ""
 
@@ -179,4 +185,40 @@ class PipelineJob(RowModel):
     locked_by: str = ""
     run_after: str = ""
     created_at: str = ""
+    updated_at: str = ""
+
+
+class ContactRequest(RowModel):
+    """A row in `contact_requests` (explicit post-approval contact request)."""
+
+    request_id: str = ""
+    lead_id: str = ""
+    status: str = "requested"
+    note: str = ""
+    requested_at: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class OutreachRevision(RowModel):
+    """A row in `outreach_revisions` (one per explicit draft request)."""
+
+    revision_id: str = ""
+    lead_id: str = ""
+    channel: str = ""
+    status: str = "requested"
+    subject: str = ""
+    body: str = ""
+    dm_body: str = ""
+    requested_at: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class WorkerHeartbeat(RowModel):
+    """The single-row worker liveness marker."""
+
+    heartbeat_id: str = ""
+    worker_id: str = ""
+    beat_at: str = ""
     updated_at: str = ""

@@ -2,9 +2,11 @@
 
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_Redesign_PRD.md`
-**Scope:** Tickets **T00–T07** (the Phase 1–4 redesign implementation)
+**Scope:** Tickets **T00–T10** (full redesign and release handoff)
 **Report date:** 2026-10-19
-**Status:** Implemented and verified at build/test level. Live-browser checks for the extension and the 360/768/1280 UI walkthrough remain manual follow-ups (see §10).
+**Status:** **COMPLETE.** All T00–T10 deliverables are implemented and verified at
+build/test level. The only remaining items are manual browser walkthroughs that
+cannot be executed in this environment (see §14).
 
 ---
 
@@ -30,22 +32,54 @@ Delivered outcomes:
 - The console shows verified badges, precision-aware counts, explicit missing
   fields, and honest "Posts not captured in snapshot" states, with responsive
   navigation and accessible forms.
+- Operators can record a **fit decision** (Approve / Need evidence / Reject);
+  contact and draft requests are **server-gated** on approval, and every draft
+  request appends a revision to `outreach_revisions`.
+- **Mission Control** (`/settings`) reports truthful readiness (database, worker
+  heartbeat `active`/`stale`/`stopped`, Gemini/HikerAPI `configured`/`disabled`)
+  without exposing secrets. The worker touches a heartbeat every poll cycle.
 
-Intentional deviations and scoping decisions are recorded in §9.
+### Completion status (T00–T10)
+
+| Ticket | Status | Primary evidence |
+| --- | --- | --- |
+| T00 | **DONE** | Draft preservation + 409 AI guard (`pipeline.py`, `dashboard/routes.py`) |
+| T01 | **DONE** | Derived progress (`db/progress.py`), filters/counters agree |
+| T02 | **DONE** | Responsive `TopNav`/sidebar, QA09 form, QA11 labels |
+| T03 | **DONE** | DOM snapshot parsers + `docs/extension-capture.md` |
+| T04 | **DONE** | Additive intake, `request_id`, migration `a1b2c3d4e5f6` |
+| T05 | **DONE** | Snapshot preview, Add All Verified, retry |
+| T06 | **DONE** | Snapshot bypass, masking, deferred stage scheduling |
+| T07 | **DONE** | Verified badge, precision, missing fields, media honesty |
+| T08 | **DONE** | Fit decision, contact/draft gates, `outreach_revisions` |
+| T09 | **DONE** | Heartbeat, `/integrations/status`, `/settings` |
+| T10 | **DONE** | This report + green pytest/lint/tsc/build |
+
+Intentional deviations and scoping decisions are recorded in §13.
 
 ---
 
 ## 2. Verification snapshot
 
+Verified on 2026-10-19 at release-handoff time (T10):
+
 | Area | Command | Result |
 | --- | --- | --- |
-| Backend | `python -m pytest` | **202 passed** |
+| Backend | `python -m pytest` | **224 passed** |
 | Extension | `node --test extension/lib.test.js` | **39 passed** |
 | Frontend lint | `npm run lint` | clean |
 | Frontend typecheck | `npx tsc --noEmit` | clean |
-| Frontend build | `npm run build` | success (Next.js 16.4, Turbopack) |
-| Migration | `alembic upgrade head` | applied (`a1b2c3d4e5f6`) |
-| API smoke | `POST /api/v1/leads` + `GET` | `snapshot.is_verified=true`, `followers.precision=approximate`, `snapshot.bio` absent |
+| Frontend build | `npm run build` | success (Next.js 16.4, Turbopack; `/settings` route present) |
+| Migrations | `alembic upgrade head` | applied (`a1b2c3d4e5f6`, `b2c3d4e5f6a7`) |
+| API smoke (snapshot) | `POST /api/v1/leads` + `GET` | `snapshot.is_verified=true`, `followers.precision=approximate`, `snapshot.bio` absent |
+| API smoke (gates) | `contact-requests` before/after approval | `403 FIT_APPROVAL_REQUIRED` → `201` after approval |
+| API smoke (revisions) | two `draft-requests` | 2 distinct rows in `outreach_revisions` |
+| API smoke (readiness) | `GET /api/v1/integrations/status` | `worker=active`, `worker_last_beat_at` populated, `database=healthy` |
+| Schema check | `alembic_version` | `b2c3d4e5f6a7` |
+| Container check | `docker compose ps` | `db`, `api`, `worker`, `frontend` up; `db`/`api` healthy |
+
+> The automated suite lives in `tests/` (there is no `backend/tests/` directory);
+> `python -m pytest` from the repository root runs the complete suite.
 
 ---
 
@@ -80,7 +114,7 @@ before enqueue; absent prerequisites return a stable code.
 **Acceptance:** A27/A28 satisfied at the API and stage level.
 
 **Note:** Explicit regeneration ("creates a separate revision") is intentionally
-unavailable until revision storage exists (see §9).
+unavailable until revision storage exists (see §14).
 
 ---
 
@@ -155,7 +189,7 @@ sample fixtures and no live collection without approval.
   injected-UI fixtures.
 
 **Limitation:** No live Chrome run was possible in this environment; selectors
-are validated against fixtures only (§10).
+are validated against fixtures only (§14).
 
 ---
 
@@ -195,7 +229,7 @@ requests idempotent by `request_id`.
   malformed→missing, URL cap, handle-only compatibility, snapshot exposure).
 
 **Deviation:** This is the minimal intake required by T05, not the full
-versioned-snapshot/evidence-version model described in PRD §11 (see §9).
+versioned-snapshot/evidence-version model described in PRD §11 (see §13).
 
 ---
 
@@ -311,24 +345,177 @@ represented explicitly.
 - Tests: backend snapshot-exposure contract tests; frontend verified via
   lint/typecheck/build.
 
-**Scope note:** The PRD's literal T07 is the fit-review workflow (campaign
-criteria version, manual approve/reject, stale-approval invalidation). This
-implementation delivers the **lead-presentation** half requested for Phase 4;
-the decision workflow remains future work (§10).
+**Scope note:** The PRD's literal T07 also includes campaign-criteria versioning
+and stale-approval invalidation. The **fit decision, contact gate, and draft
+revision workflow** are delivered as **T08** below. Campaign-criteria versioning
+and automatic stale-approval invalidation remain follow-ups (§14).
 
 ---
 
-## 10. Intentional deviations and scoping decisions
+## 10. T08 — Fit gates, contact requests, and draft revisions
+
+**PRD expectation:** A server-enforced manual fit decision; contact and draft
+actions only after approval; drafts must preserve revision history.
+
+**As built**
+
+- **Fit decision** (`PATCH /api/v1/leads/{lead_id}/fit`)
+  - Body `{ action: "approve" | "reject" | "need_evidence", note?: string }`.
+  - Stored on the lead as `fit_status` (`approved` / `rejected` /
+    `needs_evidence`), `fit_note`, and a server-generated `fit_decided_at`.
+  - `reject` without a non-empty note returns **422**; unknown action **422**;
+    missing lead **404**.
+  - Implemented in `backend/app/leads/{routes,service,schemas}.py` and
+    `backend/app/db/repository.py` (`set_fit_decision`).
+- **Contact gate** (`POST /api/v1/leads/{lead_id}/contact-requests`)
+  - Requires `fit_status == "approved"`; otherwise **403** with
+    `{"code": "FIT_APPROVAL_REQUIRED", "fit_status": ...}`.
+  - Creates a row in `contact_requests` (`request_id`, `lead_id`, `status`,
+    `note`, `requested_at`). Returns **201**.
+- **Draft gate** (`POST /api/v1/leads/{lead_id}/draft-requests`)
+  - Requires `fit_status == "approved"`; else **403**.
+  - Body `{ channel: "email" | "instagram_dm" }`; invalid channel **422**.
+  - **Each request appends a new row** to `outreach_revisions`, preserving
+    history. Returns **201** with the revision.
+- **Revision history** (`GET /api/v1/leads/{lead_id}/draft-requests`)
+  - Returns `{ items: [...], total: N }` oldest-first; `404` for a missing lead.
+- **Frontend**
+  - `frontend/src/components/fit-decision.tsx`: status, note, decided time, and
+    **Approve Fit / Need Evidence / Reject** buttons (reject requires a note).
+  - `frontend/src/components/outreach-gates.tsx`: **Find contact details** and
+    **Generate Draft** (Email / Instagram DM) are disabled until approved, with a
+    visible explanation and `aria-describedby`/tooltip.
+  - `frontend/src/actions/fit.ts`: server actions calling the API and revalidating
+    the lead detail/list.
+  - Lead detail page renders the fit bar, gates, and **Draft revision history**
+    whenever revisions exist.
+- **Schema** (migration `b2c3d4e5f6a7`)
+  - `leads.fit_status` (indexed), `leads.fit_note`, `leads.fit_decided_at`.
+  - `contact_requests` and `outreach_revisions` tables.
+- **Tests:** `tests/test_fit_gates.py` (16 cases) covers approve/need-evidence,
+  rejection-note validation, invalid action, 403 gates for unreviewed and
+  rejected leads, 201 requests, per-request revision history, channel validation,
+  and 404s. `tests/test_api_leads.py` confirms the fit fields are exposed.
+- **Live smoke:** contact request before approval → `403`; after approval →
+  `201`; two draft requests → two distinct revisions.
+
+---
+
+## 11. T09 — Worker heartbeat, readiness API, and Mission Control
+
+**PRD expectation:** A worker heartbeat, a secret-free readiness endpoint, and a
+Settings view showing truthful prerequisite status.
+
+**As built**
+
+- **Heartbeat**
+  - `worker_heartbeat` single-row table (`heartbeat_id = "worker"`, `worker_id`,
+    `beat_at`, `updated_at`).
+  - `Repository.touch_heartbeat()` upserts it; `Worker.run()` touches it **every
+    poll cycle** (before claiming and after each job). A heartbeat failure is
+    logged but never stops processing.
+- **Readiness API** (`GET /api/v1/integrations/status`, authenticated by
+  `x-api-key` like the rest of the API)
+  - `database`: `healthy` | `unreachable` (probes with `SELECT 1`).
+  - `worker`: `active` | `stale` | `stopped` — `stale` when the heartbeat is older
+    than **60 seconds** (`constants.WORKER_STALE_SECONDS`); `stopped` when no
+    heartbeat exists.
+  - `worker_last_beat_at`: last heartbeat timestamp (added for the UI).
+  - `gemini` / `hikerapi`: `configured` | `disabled` from env
+    (`AI_ENABLED` + `GEMINI_API_KEY`; `HIKERAPI_KEY`).
+  - **Secret-free:** the response contains exactly those five keys and never
+    returns credential values.
+- **Settings / Mission Control** (`/settings`)
+  - Server page fetching the readiness endpoint.
+  - Cards: **Background Worker** (green pulsing dot when active, amber when
+    stale, gray when stopped, plus last heartbeat time), **Database** badge,
+    **Gemini AI** and **HikerAPI** configured/missing-key indicators.
+  - **Pipeline Rules** section: snapshot-first capture, contact masking, reviewed
+    draft preservation, HikerAPI fallback (optional/disabled), AI review-only, and
+    the 60s stale threshold.
+  - Settings added to the shared navigation (`NAV_LINKS`), so it appears in both
+    the desktop sidebar and the responsive top bar.
+- **No new environment variables are required.** The heartbeat is database-backed;
+  the status endpoint reads existing settings. Keep `WORKER_POLL_INTERVAL` at or
+  below 60 seconds (default 30) so the worker reports `active` between polls.
+- **Tests:** `tests/test_integrations_status.py` (6 cases) covers stopped/active/
+  stale transitions, the `_worker_state` helper, the worker loop touching the
+  heartbeat, configured/disabled providers, absence of secrets, and a simulated
+  database outage returning `unreachable` instead of raising. The API-field test
+  in `tests/test_fit_gates.py` covers the fit fields on leads.
+- **Live smoke:** after recreating the worker, the endpoint returned
+  `worker=active` with a populated `worker_last_beat_at`, `database=healthy`.
+
+---
+
+## 12. T10 — Release handoff and final verification
+
+**Deliverable:** A clean release gate, updated documentation, and an auditable
+completion record.
+
+**Verification performed (2026-10-19)**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Backend suite | `python -m pytest` | **224 passed** |
+| Extension suite | `node --test extension/lib.test.js` | **39 passed** |
+| Frontend lint | `npm run lint` | clean |
+| Frontend typecheck | `npx tsc --noEmit` | clean |
+| Frontend build | `npm run build` | success; `/settings` route present |
+| Migrations | `alembic upgrade head` | head `b2c3d4e5f6a7` |
+| Containers | `docker compose ps` | db/api/worker/frontend up, db/api healthy |
+| Readiness | `GET /api/v1/integrations/status` | secret-free, worker active |
+
+**Documentation updated**
+
+- `IMPLEMENTATION_REPORT_v1.1.md` (this file) — T00–T10 as-built, deviations,
+  verification, auditor checklist.
+- `README.md` — snapshot-first architecture, Add All Verified, fit approval,
+  Mission Control, current Docker/Alembic quickstart.
+- `DEPLOYMENT_ORACLE.md` — new tables, heartbeat/readiness operations, and the
+  `WORKER_POLL_INTERVAL <= 60` guidance.
+- `docs/api.md`, `docs/database.md`, `docs/worker.md`, `docs/dashboard.md`,
+  `docs/extension-capture.md`.
+
+**Production cutover checklist**
+
+1. Back up PostgreSQL (`pg_dump`) before deploying.
+2. Deploy the new images and run `alembic upgrade head` (the API container does
+   this on start). Confirm `alembic_version = b2c3d4e5f6a7`.
+3. Confirm `db`, `api`, `worker`, `frontend` are up; `db`/`api` healthy.
+4. Open `/settings` and confirm `database=healthy` and `worker=active` (allow one
+   poll cycle, ≤60s).
+5. Load the unpacked extension and verify a snapshot capture + Add All Verified.
+6. Perform the manual browser checks in §14 (360/768/1280, keyboard walkthrough).
+7. Rotate any credential that was ever exposed outside `.env`.
+
+**Auditor checklist (T00–T10)**
+
+| Ticket | Evidence |
+| --- | --- |
+| T00 | `pipeline.py` draft preservation + `retry_ai` 409; tests in `test_worker_ai_stages.py` / `test_dashboard_api.py` |
+| T01 | `db/progress.py`, `repository.list_leads_with_progress`, `tests/test_progress.py` |
+| T02 | `top-nav.tsx`, `add-lead-form.tsx`, labeled Dossiers/Outreach filters; frontend build |
+| T03 | `extension/lib.js` parsers, `docs/extension-capture.md`, `lib.test.js` |
+| T04 | `leads/schemas.py` snapshot intake, migration `a1b2c3d4e5f6`, `request_id` idempotency |
+| T05 | `extension/popup.*`, Add All Verified, pending retry |
+| T06 | `ProfileFetchStage` snapshot bypass, `ai/masking.py`, `StageOutcome.deferred` |
+| T07 | `ProfileSnapshotOut`, `VerifiedBadge`, precision counts, missing fields, media honesty |
+| T08 | fit/contact/draft endpoints, `contact_requests` + `outreach_revisions`, `test_fit_gates.py` |
+| T09 | `worker_heartbeat`, `/integrations/status`, `/settings`, `test_integrations_status.py` |
+| T10 | This report + green `pytest`/`lint`/`tsc`/`build` |
+
+---
+
+## 13. Intentional deviations and scoping decisions
 
 These are deliberate decisions, not omissions by accident.
 
-1. **Settings page / nav link omitted.**
-   The PRD §8.1 lists "Settings" as primary navigation, but no `/settings` route
-   or functional requirements were defined for it in this milestone. Adding a
-   link would create a dead route. It was intentionally excluded to avoid dead
-   links and scope creep. Settings remain environment configuration
-   (`backend/.env`, `frontend/.env.local`) with an administrator instruction
-   path. Add the route and link together in a later ticket.
+1. **No automatic stale-approval invalidation.**
+   A decision is stored as `fit_status=approved`; later evidence changes do not
+   automatically downgrade it to `review_needed`. Campaign-criteria versioning and
+   automatic re-review are follow-ups. Operators can re-decide at any time via
+   `PATCH /api/v1/leads/{id}/fit`.
 
 2. **Navigation labels retained (Leads, Dossiers, Outreach).**
    The PRD suggests task-oriented labels ("Creators", "Review fit"). We kept the
@@ -347,11 +534,11 @@ These are deliberate decisions, not omissions by accident.
    idempotency, and a single JSON snapshot column. The full versioned-snapshot
    table, evidence versions, and atomic update policy from PRD §11 are deferred.
 
-5. **T07 is presentation-only.**
-   Fit decision controls (approve / need evidence / reject, campaign criteria
-   versions, stale-approval invalidation) are not implemented; this milestone
-   covers verified badges, snapshot evidence, precision, missing fields, and
-   media honesty.
+5. **T07/T08 split.**
+   Lead presentation (verified badge, precision, missing fields) is T07; the
+   server-enforced fit decision, contact gate, and draft revisions are T08. Both
+   are implemented. Campaign-criteria versioning and stale-approval invalidation
+   from the PRD's T07 remain follow-ups (§14).
 
 6. **T03/T05 live verification pending.**
    No live Chrome run was possible in this environment. DOM selectors are ported
@@ -371,26 +558,27 @@ These are deliberate decisions, not omissions by accident.
 
 ---
 
-## 11. Known limitations and follow-ups
+## 14. Known limitations and follow-ups
 
-- **Fit-review workflow (full T07):** campaign criteria version, manual
-  decisions, approval-gated contact/draft requests.
+- **Campaign criteria versioning and stale-approval invalidation:** the full T07
+  decision lifecycle beyond the implemented fit/contact/draft gates.
 - **Versioned snapshots (full T04):** snapshot/evidence versions and
   "newer changed snapshot" update policy beyond the current fill-only behavior.
 - **Verified flag for HikerAPI leads:** requires a `leads.is_verified` column.
 - **Live browser verification:** extension DOM extraction and 360/768/1280
   keyboard/visual walkthroughs.
-- **Settings route:** add with real requirements before linking it in the nav.
-- **Contact retrieval (T08):** explicit post-approval contact action; contact
-  fields intentionally stay empty before approval.
+- **Contact adapter and draft generation:** `contact-requests` and
+  `draft-requests` persist the gate records but do not yet enqueue a contact
+  adapter or regenerate draft text. Existing `ai_outreach` remains the draft
+  generator.
 - **Worker media without HikerAPI:** a future snapshot-media path would need the
   extension to capture recent post metadata.
 
 ---
 
-## 12. Data model and API changes (summary)
+## 15. Data model and API changes (summary)
 
-### Migration `a1b2c3d4e5f6`
+### Migration `a1b2c3d4e5f6` (T04)
 
 | Change | Detail |
 | --- | --- |
@@ -398,47 +586,67 @@ These are deliberate decisions, not omissions by accident.
 | `leads.request_id` | `String(64)`, not null, default `''` |
 | `ix_leads_request_id` | B-tree index on `request_id` |
 
-Applied by the API container on start (`alembic upgrade head`); verified in
-PostgreSQL. No other schema changes were introduced by the redesign.
+### Migration `b2c3d4e5f6a7` (T08/T09)
+
+| Change | Detail |
+| --- | --- |
+| `leads.fit_status` | `String(32)`, default `not_reviewed`, indexed |
+| `leads.fit_note` | `Text`, default `''` |
+| `leads.fit_decided_at` | `String(40)`, default `''` |
+| `contact_requests` | PK `request_id`, FK `lead_id` (cascade), `status`, `note`, `requested_at` |
+| `outreach_revisions` | PK `revision_id`, FK `lead_id` (cascade), `channel`, `status`, subject/body/DM, `requested_at` |
+| `worker_heartbeat` | PK `heartbeat_id` (singleton `worker`), `worker_id`, `beat_at` (indexed) |
+
+Both migrations are applied by the API container on start
+(`alembic upgrade head`); the current head is `b2c3d4e5f6a7`, verified in
+PostgreSQL.
 
 ### API contract additions (backward compatible)
 
 - `POST /api/v1/leads` accepts optional `request_id` and `profile_snapshot`;
   handle-only clients are unchanged.
 - Responses include `outcome` and `missing_fields` on submission.
-- `LeadResponse` includes `progress`, `progress_remedy`, and a read-only
-  `snapshot` object.
+- `LeadResponse` includes `progress`, `progress_remedy`, a read-only `snapshot`
+  object, and `fit_status`/`fit_note`/`fit_decided_at`.
 - `retry-ai` returns HTTP 409 with a stable `AI_UNAVAILABLE` detail when AI is
   not configured.
 - Stats include `leads_by_progress`; the list `status` filter matches derived
   progress.
+- `PATCH /api/v1/leads/{id}/fit` records a fit decision.
+- `POST /api/v1/leads/{id}/contact-requests` and `/draft-requests` are
+  approval-gated (403 otherwise); `GET .../draft-requests` lists revision history.
+- `GET /api/v1/integrations/status` returns secret-free readiness including
+  `worker_last_beat_at`.
 
 ---
 
-## 13. File inventory (redesign)
+## 16. File inventory (redesign)
 
 **Backend**
 
 ```text
-app/constants.py                     stage/status constants, derived states, error codes
+app/constants.py                     stages/statuses, derived states, fit/draft constants
 app/db/progress.py                   derived research status + remedies
-app/db/repository.py                 progress aggregation, defer(), request-id lookup
-app/db/models.py                     profile_snapshot + request_id columns
-app/db/schemas.py                    Lead fields
-app/leads/schemas.py                 snapshot intake + ProfileSnapshotOut
-app/leads/service.py                 sanitization, fill-only, idempotency
-app/leads/routes.py                  submission response fields
-app/dashboard/routes.py              409 AI guard, detail progress
-app/dashboard/service.py             detail progress
-app/dashboard/schemas.py             LeadDetailOut / StatsOut fields
+app/db/models.py                     snapshot, fit, contact requests, revisions, heartbeat
+app/db/schemas.py                    corresponding row models
+app/db/repository.py                 progress, defer(), fit, requests, revisions, heartbeat
+app/leads/schemas.py                 snapshot intake, ProfileSnapshotOut, fit/request models
+app/leads/service.py                 sanitization, idempotency, fit gates, revision history
+app/leads/routes.py                  leads + PATCH /fit + contact/draft/revision endpoints
+app/dashboard/routes.py              409 AI guard, detail progress, /integrations/status
+app/dashboard/service.py             detail progress + integrations_status()
+app/dashboard/schemas.py             LeadDetailOut, StatsOut, IntegrationsStatusOut
 app/worker/pipeline.py               snapshot bypass, masking, deferral, draft guard
-app/worker/main.py                   optional HikerAPI, deferred outcomes
+app/worker/main.py                   optional HikerAPI, deferred outcomes, heartbeat
 app/worker/snapshot.py               snapshot -> lead fields
 app/ai/masking.py                    contact-pattern masking
 app/ai/evidence.py                   masked AI evidence
 alembic/versions/a1b2c3d4e5f6_add_capture_snapshot.py
+alembic/versions/b2c3d4e5f6a7_fit_requests_heartbeat.py
 tests/test_progress.py
 tests/test_worker_snapshot.py
+tests/test_fit_gates.py
+tests/test_integrations_status.py
 tests/test_api_leads.py
 tests/test_dashboard_api.py
 tests/test_worker_ai_stages.py
@@ -454,26 +662,31 @@ manifest.json, lib.test.js, README.md
 **Frontend**
 
 ```text
-lib/types.ts, lib/format.ts, lib/api.ts, actions/leads.ts,
+lib/types.ts, lib/format.ts, lib/api.ts,
+actions/leads.ts, actions/fit.ts,
 components/ui.tsx, components/nav.tsx, components/top-nav.tsx,
 components/add-lead-form.tsx, components/leads-table.tsx, components/lead-filters.tsx,
+components/fit-decision.tsx, components/outreach-gates.tsx,
 app/(dashboard)/layout.tsx, app/(dashboard)/leads/page.tsx,
 app/(dashboard)/leads/[leadId]/page.tsx, app/(dashboard)/dossiers/page.tsx,
-app/(dashboard)/outreach/page.tsx
+app/(dashboard)/outreach/page.tsx,
+app/(dashboard)/settings/page.tsx, app/(dashboard)/settings/loading.tsx
 ```
 
 **Docs**
 
 ```text
-docs/api.md, docs/worker.md, docs/dashboard.md, docs/extension-capture.md
+docs/api.md, docs/database.md, docs/worker.md, docs/dashboard.md,
+docs/extension-capture.md, README.md, DEPLOYMENT_ORACLE.md,
+IMPLEMENTATION_REPORT_v1.1.md
 ```
 
 ---
 
-## 14. How to verify
+## 17. How to verify
 
 ```powershell
-# Backend
+# Backend (suite lives in tests/, not backend/tests/)
 .\backend\.venv\Scripts\python.exe -m pytest
 
 # Extension (fixtures only; no browser)
@@ -489,8 +702,20 @@ npm run build
 docker compose --profile frontend up -d --build
 docker compose exec api alembic upgrade head
 docker compose exec db psql -U postgres -d synpo -c "select version_num from alembic_version;"
+# expected: b2c3d4e5f6a7
+
+# Readiness (replace with your key)
+curl -s -H "x-api-key: $API_KEY" http://127.0.0.1:8000/api/v1/integrations/status
 ```
 
-Manual follow-ups: load the unpacked extension on a real profile, confirm the
-snapshot preview and verified-rail scan; then walk the console at 360, 768, and
-1280 CSS pixels with keyboard-only navigation.
+Transactional checks:
+
+```powershell
+# 1) create a lead, 2) contact gate should 403, 3) approve, 4) gate should 201
+# 5) two draft requests should yield two revisions
+```
+
+Manual follow-ups (cannot run headless here): load the unpacked extension on a
+real profile, confirm the snapshot preview and verified-rail scan; then walk the
+console at 360, 768, and 1280 CSS pixels with keyboard-only navigation, including
+`/settings` and the lead fit-approval controls.

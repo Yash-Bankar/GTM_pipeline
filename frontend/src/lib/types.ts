@@ -45,6 +45,9 @@ export interface Lead {
   progress: string;
   progress_remedy: string;
   snapshot: ProfileSnapshot | null;
+  fit_status: string;
+  fit_note: string;
+  fit_decided_at: string;
 }
 
 export interface LeadList {
@@ -166,4 +169,29 @@ export interface Stats {
   dossiers_total: number;
   outreach_total: number;
   outreach_needs_review: number;
+}
+
+export interface IntegrationsStatus {
+  database: "healthy" | "unreachable";
+  worker: "active" | "stale" | "stopped";
+  gemini: "configured" | "disabled";
+  hikerapi: "configured" | "disabled";
+  worker_last_beat_at: string;
+}
+
+export interface OutreachRevision {
+  revision_id: string;
+  lead_id: string;
+  channel: string;
+  status: string;
+  subject: string;
+  body: string;
+  dm_body: string;
+  requested_at: string;
+  created_at: string;
+}
+
+export interface OutreachRevisionList {
+  items: OutreachRevision[];
+  total: number;
 }

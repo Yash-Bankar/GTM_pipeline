@@ -29,7 +29,9 @@ preserved.
 `instagram_id`, `follower_count`, `follows_count`, `business_category_name`,
 `bio`, `business_email`, `business_phone_number`, `profile_url`, `external_url`,
 `all_external_urls`, `engagement_rate`, `scraped_at`, `status`, `source`,
-`media_status`, `website_status`, `last_error`, `created_at`, `updated_at`.
+`media_status`, `website_status`, `last_error`, `profile_snapshot` (JSON text),
+`request_id` (indexed), `fit_status` (`not_reviewed`/`approved`/`rejected`/
+`needs_evidence`, indexed), `fit_note`, `fit_decided_at`, timestamps.
 
 ### `lead_posts` (PK `post_id`)
 `lead_id` → `leads` (cascade), `username`, `username_normalized`, `media_type`,
@@ -56,6 +58,20 @@ timestamps. `page_id` is a deterministic hash of `(lead_id, url)`.
 `status` (`queued`/`running`/`retry`/`done`/`error`), `attempt_count`,
 `max_attempts`, `priority`, `payload`, `result`, `last_error`, `locked_at`,
 `locked_by`, `run_after`, timestamps.
+
+### `contact_requests` (PK `request_id`) — T08
+`lead_id` → `leads` (cascade), `status` (`requested`/...), `note`,
+`requested_at`, timestamps. Created only after `leads.fit_status = approved`.
+
+### `outreach_revisions` (PK `revision_id`) — T08
+`lead_id` → `leads` (cascade), `channel` (`email`/`instagram_dm`), `status`,
+`subject`, `body`, `dm_body`, `requested_at`, timestamps. One row per explicit
+draft request, so history is preserved.
+
+### `worker_heartbeat` (PK `heartbeat_id`, singleton `worker`) — T09
+`worker_id`, `beat_at` (indexed), `updated_at`. Touched by the worker each poll
+cycle; the readiness endpoint reports `active` (≤60s), `stale` (>60s), or
+`stopped` (no row).
 
 ## Contracts preserved
 

@@ -19,6 +19,9 @@ from app import constants
 
 from .errors import DuplicateLeadError
 from .models import (
+    ContactRequest as ContactRequestORM,
+)
+from .models import (
     Dossier as DossierORM,
 )
 from .models import (
@@ -26,6 +29,9 @@ from .models import (
 )
 from .models import (
     OutreachDraft as OutreachORM,
+)
+from .models import (
+    OutreachRevision as OutreachRevisionORM,
 )
 from .models import (
     PipelineJob as JobORM,
@@ -36,14 +42,20 @@ from .models import (
 from .models import (
     WebsitePage as PageORM,
 )
+from .models import (
+    WorkerHeartbeat as HeartbeatORM,
+)
 from .progress import derive_research_status, research_remedy
 from .schemas import (
+    ContactRequest,
     Dossier,
     Lead,
     LeadPost,
     OutreachEntry,
+    OutreachRevision,
     PipelineJob,
     WebsitePage,
+    WorkerHeartbeat,
 )
 from .util import new_job_id, new_lead_id, normalize_username, utc_now_iso
 
@@ -318,6 +330,86 @@ class Repository:
         row.updated_at = utc_now_iso()
         self.session.commit()
         return OutreachEntry.model_validate(row)
+
+    # -- fit decisions + explicit requests (T08) ---------------------------
+
+    def set_fit_decision(
+        self, lead_id: str, *, status: str, note: str, decided_at: str
+    ) -> Lead | None:
+        return self.update_lead(
+            lead_id,
+            {"fit_status": status, "fit_note": note, "fit_decided_at": decided_at},
+        )
+
+    def create_contact_request(self, request: ContactRequest) -> ContactRequest:
+        now = utc_now_iso()
+        data = request.model_dump()
+        data["created_at"] = data.get("created_at") or now
+        data["updated_at"] = now
+        row = ContactRequestORM(**data)
+        self.session.add(row)
+        self.session.commit()
+        return ContactRequest.model_validate(row)
+
+    def list_contact_requests(self, lead_id: str) -> list[ContactRequest]:
+        rows = self.session.scalars(
+            select(ContactRequestORM)
+            .where(ContactRequestORM.lead_id == lead_id)
+            .order_by(ContactRequestORM.created_at)
+        ).all()
+        return [ContactRequest.model_validate(row) for row in rows]
+
+    def create_outreach_revision(self, revision: OutreachRevision) -> OutreachRevision:
+        now = utc_now_iso()
+        data = revision.model_dump()
+        data["created_at"] = data.get("created_at") or now
+        data["updated_at"] = now
+        row = OutreachRevisionORM(**data)
+        self.session.add(row)
+        self.session.commit()
+        return OutreachRevision.model_validate(row)
+
+    def list_outreach_revisions(self, lead_id: str) -> list[OutreachRevision]:
+        rows = self.session.scalars(
+            select(OutreachRevisionORM)
+            .where(OutreachRevisionORM.lead_id == lead_id)
+            .order_by(OutreachRevisionORM.created_at)
+        ).all()
+        return [OutreachRevision.model_validate(row) for row in rows]
+
+    # -- worker heartbeat (T09) -------------------------------------------
+
+    def touch_heartbeat(self, worker_id: str = "", *, beat_at: str | None = None) -> str:
+        moment = beat_at or utc_now_iso()
+        row = self.session.get(HeartbeatORM, constants.WORKER_HEARTBEAT_ID)
+        if row is None:
+            row = HeartbeatORM(
+                heartbeat_id=constants.WORKER_HEARTBEAT_ID,
+                worker_id=worker_id,
+                beat_at=moment,
+                updated_at=moment,
+            )
+            self.session.add(row)
+        else:
+            row.worker_id = worker_id or row.worker_id
+            row.beat_at = moment
+            row.updated_at = moment
+        try:
+            self.session.commit()
+        except IntegrityError:
+            # Another writer inserted the row first; update it instead.
+            self.session.rollback()
+            row = self.session.get(HeartbeatORM, constants.WORKER_HEARTBEAT_ID)
+            if row is not None:
+                row.worker_id = worker_id or row.worker_id
+                row.beat_at = moment
+                row.updated_at = moment
+                self.session.commit()
+        return moment
+
+    def get_heartbeat(self) -> WorkerHeartbeat | None:
+        row = self.session.get(HeartbeatORM, constants.WORKER_HEARTBEAT_ID)
+        return WorkerHeartbeat.model_validate(row) if row is not None else None
 
     # -- jobs ---------------------------------------------------------------
 

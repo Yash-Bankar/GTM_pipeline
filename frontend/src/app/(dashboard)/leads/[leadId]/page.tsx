@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { FitDecision } from "@/components/fit-decision";
+import { OutreachGates } from "@/components/outreach-gates";
 import { RetryAiButton } from "@/components/retry-ai-button";
 import { RetryButton } from "@/components/retry-button";
 import {
@@ -15,8 +17,16 @@ import {
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
-import { formatCount, followerLabel, formatNumber, humanize, splitUrls } from "@/lib/format";
+import {
+  formatCount,
+  followerLabel,
+  formatDate,
+  formatNumber,
+  humanize,
+  splitUrls,
+} from "@/lib/format";
 import { requireSession } from "@/lib/session";
+import type { OutreachRevision } from "@/lib/types";
 
 type Params = Promise<{ leadId: string }>;
 
@@ -48,10 +58,18 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
     throw error;
   }
 
+  let revisions: OutreachRevision[] = [];
+  try {
+    revisions = (await api.listDraftRevisions(leadId)).items;
+  } catch {
+    revisions = [];
+  }
+
   const { lead, progress, progress_remedy: remedy, posts, website_pages: pages, jobs } = detail;
   const snapshot = lead.snapshot;
   const links = splitUrls(lead.all_external_urls);
   const postsEmpty = postsEmptyCopy(lead.media_status);
+  const approved = lead.fit_status === "approved";
 
   return (
     <>
@@ -209,9 +227,51 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
               </ul>
             )}
           </Card>
+
+          {revisions.length > 0 ? (
+            <Card>
+              <CardHeader
+                title="Draft revision history"
+                subtitle={`${revisions.length} request${revisions.length === 1 ? "" : "s"}`}
+              />
+              <ul className="divide-y divide-ink-800">
+                {revisions.map((revision) => (
+                  <li
+                    key={revision.revision_id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-5 py-3"
+                  >
+                    <div>
+                      <p className="text-sm text-mist-100">{humanize(revision.channel)}</p>
+                      <p className="font-mono text-[11px] text-mist-400">
+                        {formatDate(revision.requested_at || revision.created_at)}
+                      </p>
+                    </div>
+                    <Badge tone={revision.status === "requested" ? "blue" : "neutral"}>
+                      {humanize(revision.status)}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
         </div>
 
         <div className="space-y-5">
+          <Card>
+            <CardHeader title="Fit decision" subtitle="Separate from research progress" />
+            <FitDecision
+              leadId={lead.lead_id}
+              fitStatus={lead.fit_status}
+              fitNote={lead.fit_note}
+              fitDecidedAt={lead.fit_decided_at}
+            />
+          </Card>
+
+          <Card>
+            <CardHeader title="Contact & drafts" subtitle="Requires an approved fit" />
+            <OutreachGates leadId={lead.lead_id} approved={approved} />
+          </Card>
+
           <Card>
             <CardHeader title="Processing" subtitle="Re-run stages manually" />
             <div className="space-y-3 px-5 py-4">

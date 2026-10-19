@@ -6,12 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.dependencies import get_lead_service, require_api_key
 from app.leads.schemas import (
+    ContactRequestCreate,
+    ContactRequestOut,
+    DraftRequestCreate,
+    FitDecisionRequest,
     LeadCreateRequest,
     LeadListResponse,
     LeadResponse,
     LeadSubmissionResponse,
+    OutreachRevisionListOut,
+    OutreachRevisionOut,
 )
-from app.leads.service import LeadService
+from app.leads.service import FitNotApprovedError, LeadService
 
 router = APIRouter(
     prefix="/api/v1",
@@ -89,3 +95,115 @@ def get_lead(
         )
     lead, progress, remedy = result
     return LeadResponse.from_lead(lead, progress=progress, remedy=remedy)
+
+
+@router.patch(
+    "/leads/{lead_id}/fit",
+    response_model=LeadResponse,
+    summary="Record a manual fit decision (T08)",
+)
+def decide_fit(
+    lead_id: str,
+    payload: FitDecisionRequest,
+    service: LeadService = Depends(get_lead_service),
+) -> LeadResponse:
+    try:
+        lead = service.decide_fit(lead_id, action=payload.action, note=payload.note)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    if lead is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    context = service.get(lead_id)
+    if context is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    lead, progress, remedy = context
+    return LeadResponse.from_lead(lead, progress=progress, remedy=remedy)
+
+
+@router.post(
+    "/leads/{lead_id}/contact-requests",
+    response_model=ContactRequestOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Request public contact details (requires approved fit)",
+)
+def request_contact(
+    lead_id: str,
+    payload: ContactRequestCreate | None = None,
+    service: LeadService = Depends(get_lead_service),
+) -> ContactRequestOut:
+    try:
+        request = service.request_contact(lead_id, note=payload.note if payload else "")
+    except FitNotApprovedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FIT_APPROVAL_REQUIRED",
+                "message": "Approve fit before requesting contact details.",
+                "fit_status": exc.fit_status,
+            },
+        ) from exc
+    if request is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    return ContactRequestOut.from_model(request)
+
+
+@router.post(
+    "/leads/{lead_id}/draft-requests",
+    response_model=OutreachRevisionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Request a new outreach draft revision (requires approved fit)",
+)
+def request_draft(
+    lead_id: str,
+    payload: DraftRequestCreate,
+    service: LeadService = Depends(get_lead_service),
+) -> OutreachRevisionOut:
+    try:
+        revision = service.request_draft(lead_id, channel=payload.channel)
+    except FitNotApprovedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FIT_APPROVAL_REQUIRED",
+                "message": "Approve fit before requesting outreach drafts.",
+                "fit_status": exc.fit_status,
+            },
+        ) from exc
+    if revision is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    return OutreachRevisionOut.from_model(revision)
+
+
+@router.get(
+    "/leads/{lead_id}/draft-requests",
+    response_model=OutreachRevisionListOut,
+    summary="List outreach draft revision history (T08)",
+)
+def list_draft_requests(
+    lead_id: str,
+    service: LeadService = Depends(get_lead_service),
+) -> OutreachRevisionListOut:
+    if service.get(lead_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    rows = service.list_draft_revisions(lead_id)
+    return OutreachRevisionListOut(
+        items=[OutreachRevisionOut.from_model(row) for row in rows],
+        total=len(rows),
+    )

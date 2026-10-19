@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+from sqlalchemy import text
 
 from app import constants
+from app.config import get_settings
 from app.db.repository import Repository
 from app.db.schemas import (
     Dossier,
@@ -165,3 +169,55 @@ class DashboardService:
 
     def stats(self) -> dict[str, object]:
         return self._repo.stats()
+
+    # -- integrations / readiness (T09) -------------------------------------
+
+    def integrations_status(self) -> dict[str, str]:
+        """Secret-free system readiness; never returns credential values."""
+        settings = get_settings()
+
+        database = "healthy"
+        try:
+            self._repo.session.execute(text("SELECT 1"))
+        except Exception:  # noqa: BLE001 - reported as unreachable, not raised
+            database = "unreachable"
+
+        worker = "stopped"
+        beat_at = ""
+        if database == "healthy":
+            try:
+                heartbeat = self._repo.get_heartbeat()
+                beat_at = heartbeat.beat_at if heartbeat else ""
+                worker = _worker_state(beat_at)
+            except Exception:  # noqa: BLE001 - treat unreadable heartbeat as stopped
+                worker = "stopped"
+
+        gemini = (
+            "configured"
+            if settings.ai_enabled and settings.gemini_api_key.strip()
+            else "disabled"
+        )
+        hikerapi = "configured" if settings.hikerapi_key.strip() else "disabled"
+        return {
+            "database": database,
+            "worker": worker,
+            "gemini": gemini,
+            "hikerapi": hikerapi,
+            "worker_last_beat_at": beat_at,
+        }
+
+
+def _worker_state(beat_at: str) -> str:
+    """Map a stored heartbeat timestamp to ``active``/``stale``/``stopped``."""
+    if not beat_at:
+        return "stopped"
+    try:
+        moment = datetime.fromisoformat(beat_at)
+    except (TypeError, ValueError):
+        return "stopped"
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - moment).total_seconds()
+    if age < 0:
+        age = 0
+    return "active" if age <= constants.WORKER_STALE_SECONDS else "stale"

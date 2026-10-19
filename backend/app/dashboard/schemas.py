@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -219,3 +220,13 @@ class StatsOut(BaseModel):
     dossiers_total: int
     outreach_total: int
     outreach_needs_review: int
+
+
+class IntegrationsStatusOut(BaseModel):
+    """Secret-free readiness snapshot (PRD T09)."""
+
+    database: Literal["healthy", "unreachable"]
+    worker: Literal["active", "stale", "stopped"]
+    gemini: Literal["configured", "disabled"]
+    hikerapi: Literal["configured", "disabled"]
+    worker_last_beat_at: str = ""

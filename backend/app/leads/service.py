@@ -9,7 +9,8 @@ from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlunparse
 
 from app import constants
 from app.db.repository import Repository
-from app.db.schemas import Lead
+from app.db.schemas import ContactRequest, Lead, OutreachRevision
+from app.db.util import new_job_id, utc_now_iso
 
 from .schemas import (
     COUNT_PRECISIONS,
@@ -45,6 +46,14 @@ class LeadSubmission:
     remedy: str = ""
     outcome: str = "new"
     missing_fields: list[str] = field(default_factory=list)
+
+
+class FitNotApprovedError(Exception):
+    """Raised when a contact/draft request is made before fit approval (T08)."""
+
+    def __init__(self, fit_status: str) -> None:
+        super().__init__(fit_status)
+        self.fit_status = fit_status
 
 
 class LeadService:
@@ -134,6 +143,71 @@ class LeadService:
             return None
         progress, remedy = self._repo.lead_progress(lead_id)
         return (lead, progress, remedy)
+
+    def decide_fit(self, lead_id: str, *, action: str, note: str = "") -> Lead | None:
+        """Record a manual fit decision (T08).
+
+        ``action`` is one of ``approve``/``reject``/``need_evidence``. A rejection
+        requires a note. Returns ``None`` when the lead does not exist.
+        """
+        if self._repo.get_lead(lead_id) is None:
+            return None
+        status = constants.FIT_ACTIONS.get(action)
+        if status is None:
+            raise ValueError(f"Unknown fit action '{action}'.")
+        if status == constants.FIT_STATUS_REJECTED and not note.strip():
+            raise ValueError("A note is required when rejecting a creator.")
+        return self._repo.set_fit_decision(
+            lead_id,
+            status=status,
+            note=note.strip(),
+            decided_at=utc_now_iso(),
+        )
+
+    def request_contact(self, lead_id: str, *, note: str = "") -> ContactRequest | None:
+        """Queue an explicit contact request; requires an approved fit (T08)."""
+        lead = self._repo.get_lead(lead_id)
+        if lead is None:
+            return None
+        self._require_approved(lead)
+        now = utc_now_iso()
+        return self._repo.create_contact_request(
+            ContactRequest(
+                request_id=new_job_id("cr"),
+                lead_id=lead_id,
+                status="requested",
+                note=note.strip(),
+                requested_at=now,
+            )
+        )
+
+    def request_draft(self, lead_id: str, *, channel: str) -> OutreachRevision | None:
+        """Create a new draft revision; requires an approved fit (T08).
+
+        Each request appends a row to ``outreach_revisions`` so history is kept.
+        """
+        lead = self._repo.get_lead(lead_id)
+        if lead is None:
+            return None
+        self._require_approved(lead)
+        now = utc_now_iso()
+        return self._repo.create_outreach_revision(
+            OutreachRevision(
+                revision_id=new_job_id("rev"),
+                lead_id=lead_id,
+                channel=channel,
+                status="requested",
+                requested_at=now,
+            )
+        )
+
+    def list_draft_revisions(self, lead_id: str) -> list[OutreachRevision]:
+        return self._repo.list_outreach_revisions(lead_id)
+
+    def _require_approved(self, lead: Lead) -> None:
+        fit_status = lead.fit_status or constants.FIT_STATUS_NOT_REVIEWED
+        if fit_status != constants.FIT_STATUS_APPROVED:
+            raise FitNotApprovedError(fit_status)
 
     def list(
         self,

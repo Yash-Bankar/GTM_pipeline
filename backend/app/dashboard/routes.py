@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.dashboard.schemas import (
     DossierListOut,
     DossierOut,
+    IntegrationsStatusOut,
     JobOut,
     LeadDetailOut,
     OutreachListOut,
@@ -189,3 +190,14 @@ def stats(
     service: DashboardService = Depends(get_dashboard_service),
 ) -> StatsOut:
     return StatsOut(**service.stats())
+
+
+@router.get(
+    "/integrations/status",
+    response_model=IntegrationsStatusOut,
+    summary="Secret-free system readiness (T09)",
+)
+def integrations_status(
+    service: DashboardService = Depends(get_dashboard_service),
+) -> IntegrationsStatusOut:
+    return IntegrationsStatusOut(**service.integrations_status())

@@ -102,6 +102,10 @@ Columns: `job_id` (PK), `stage`, `lead_id`, `username`, `username_normalized`,
 - **Serialized writes**: each job runs in its own DB session/transaction.
 - **Restart recovery**: `recover_stale_jobs` returns `running` jobs whose
   `locked_at` is older than `WORKER_STALE_MINUTES` to `retry`.
+- **Heartbeat (T09)**: every poll cycle the worker upserts a single
+  `worker_heartbeat` row (`worker_id`, `beat_at`). A heartbeat write failure is
+  logged but never stops processing. `GET /api/v1/integrations/status` reports
+  `active` (≤60s), `stale` (>60s), or `stopped` (no row).
 - **Graceful shutdown**: `SIGINT`/`SIGTERM` set a stop event; the in-flight job
   finishes, then the worker exits.
 
