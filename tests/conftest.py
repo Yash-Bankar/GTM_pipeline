@@ -27,6 +27,9 @@ def _isolate_env(monkeypatch):
     """
     monkeypatch.setenv("API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
+    # Deterministic "supported research source" so handle-only captures queue
+    # research; tests that need no source override this and clear the cache.
+    monkeypatch.setenv("HIKERAPI_KEY", "test-hiker-key")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

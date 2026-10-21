@@ -4,7 +4,7 @@ import json
 
 from app import constants
 from app.ai import AIService, DEFAULT_RUBRIC, build_evidence
-from app.ai.masking import mask_contact_patterns, normalize_bio
+from app.ai.masking import normalize_bio
 from app.ai.schemas import CriterionScore, DossierDraft
 from app.db.repository import Repository
 from app.worker.pipeline import AIDossierStage, ProfileFetchStage, WebsiteEnrichStage
@@ -68,18 +68,24 @@ def test_snapshot_bypasses_hikerapi_and_completes(repo: Repository) -> None:
     assert updated.scraped_at == "2026-10-19T00:00:00Z"
 
 
-def test_snapshot_masks_bio_and_leaves_contacts_unpopulated(repo: Repository) -> None:
-    lead, job = _claim(repo, "mask.creator", snapshot=SNAPSHOT)
+def test_v08_public_business_contacts_saved_and_visible(repo: Repository) -> None:
+    """V2-01 V08: public contacts are retained and visible, unmasked."""
+    lead, job = _claim(repo, "contacts.creator", snapshot=SNAPSHOT)
 
     ProfileFetchStage(FakeHikerClient(lambda _u: make_profile("x")), hiker_enabled=False).run(job, repo)
 
     updated = repo.get_lead(lead.lead_id)
-    assert "hello@example.org" not in updated.bio
-    assert "[email hidden]" in updated.bio
-    assert "[phone hidden]" in updated.bio
-    # Structured contact fields stay unpopulated before manual fit approval.
-    assert updated.business_email == ""
-    assert updated.business_phone_number == ""
+    assert "hello@example.org" in updated.bio
+    assert "+1 415 555 0199" in updated.bio
+    assert "hidden" not in updated.bio
+    # Ordinary research does not create a discovery request.
+    assert repo.list_contact_requests(lead.lead_id) == []
+
+    # The dashboard-facing serialization exposes the public contact.
+    from app.leads.schemas import LeadResponse
+
+    payload = LeadResponse.from_lead(updated).model_dump()
+    assert "hello@example.org" in payload["bio"]
 
 
 def test_snapshot_enqueues_website_and_ai_followups(repo: Repository) -> None:
@@ -127,31 +133,19 @@ def test_snapshot_has_data_requires_meaningful_fields() -> None:
     assert snapshot_has_data({}) is False
 
 
-def test_mask_contact_patterns_masks_email_and_phone_but_not_dates() -> None:
-    masked = mask_contact_patterns("Email a.b+c@example.co.uk or call +1 (415) 555-0199")
-    assert "a.b+c@example.co.uk" not in masked
-    assert "[email hidden]" in masked
-    assert "[phone hidden]" in masked
-    # Dates and short counts are not phones.
-    assert mask_contact_patterns("posted 2026-10-19") == "posted 2026-10-19"
-    assert mask_contact_patterns("2,118 followers") == "2,118 followers"
-
-
 def test_normalize_bio_collapses_whitespace() -> None:
     assert normalize_bio("  line one\r\n\r\n\r\nline two  ") == "line one\n\nline two"
 
 
-def test_build_evidence_masks_bio_posts_and_pages() -> None:
+def test_build_evidence_keeps_public_contacts() -> None:
     evidence = build_evidence(
         lead_values={"lead_id": "ld_1", "bio": "contact hi@x.org"},
         post_rows=[{"caption": "reach me at 5551234567"}],
         page_rows=[{"url": "https://x.org", "title": "T", "text": "call +1 415 555 0199"}],
     )
-    assert "hi@x.org" not in evidence.bio
-    assert "[email hidden]" in evidence.bio
-    assert "5551234567" not in evidence.posts[0]
-    assert "[phone hidden]" in evidence.posts[0]
-    assert "[phone hidden]" in evidence.pages[0].text
+    assert "hi@x.org" in evidence.bio
+    assert "5551234567" in evidence.posts[0]
+    assert "+1 415 555 0199" in evidence.pages[0].text
 
 
 def test_website_enrich_runs_from_snapshot_urls(repo: Repository) -> None:
@@ -168,8 +162,8 @@ def test_website_enrich_runs_from_snapshot_urls(repo: Repository) -> None:
     assert crawler.calls == 1
     pages = repo.list_website_pages(lead.lead_id)
     assert pages
-    assert "hi@example.org" not in pages[0].text
-    assert "[email hidden]" in pages[0].text
+    # V2-01: public business contacts are retained in persisted evidence.
+    assert "hi@example.org" in pages[0].text
 
 
 def test_ai_dossier_waits_for_evidence_terminal_states(repo: Repository) -> None:
@@ -227,11 +221,14 @@ def test_snapshot_to_lead_fields_omits_contact_columns() -> None:
 def test_build_stages_without_hiker_key_does_not_require_credentials() -> None:
     from app.config import Settings
     from app.worker.main import build_stages
+    from app.worker.pipeline import AIDisabledStage
 
     stages = build_stages(Settings(hikerapi_key="", ai_enabled=False))
 
     assert "profile_fetch" in stages
     assert "profile_media" in stages
     assert "website_enrich" in stages
-    # AI stages are only registered when AI is enabled.
-    assert "ai_dossier" not in stages
+    # V2-01: AI stages are registered as no-op guards so queued jobs complete
+    # harmlessly when AI is disabled.
+    assert isinstance(stages["ai_dossier"], AIDisabledStage)
+    assert isinstance(stages["ai_outreach"], AIDisabledStage)

@@ -8,6 +8,7 @@
 
 import { ApiError } from "./errors";
 import type {
+  Brief,
   Dossier,
   DossierList,
   IntegrationsStatus,
@@ -139,6 +140,10 @@ export const api = {
 
   getDossier(leadId: string) {
     return request<Dossier>(`/api/v1/dossiers/${encodeURIComponent(leadId)}`);
+  },
+
+  getBrief(leadId: string) {
+    return request<Brief>(`/api/v1/leads/${encodeURIComponent(leadId)}/brief`);
   },
 
   listOutreach(params: { limit?: number; offset?: number; status?: string } = {}) {

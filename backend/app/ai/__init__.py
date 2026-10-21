@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .evidence import Evidence, PageEvidence, build_evidence
-from .masking import mask_contact_patterns, normalize_bio
+from .masking import normalize_bio
 from .rubric import (
     DEFAULT_RUBRIC,
     Rubric,
@@ -27,7 +27,6 @@ __all__ = [
     "RubricCriterion",
     "build_evidence",
     "compute_qualification",
-    "mask_contact_patterns",
     "normalize_bio",
     "parse_rubric",
 ]

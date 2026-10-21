@@ -195,3 +195,34 @@ export interface OutreachRevisionList {
   items: OutreachRevision[];
   total: number;
 }
+
+export interface BriefSource {
+  url: string;
+  title: string;
+  status: string;
+  fetched_at: string;
+}
+
+export interface Brief {
+  lead_id: string;
+  username: string;
+  full_name: string;
+  bio: string;
+  category: string;
+  follower_count: number;
+  follower_display: string;
+  follower_precision: string;
+  follows_count: number;
+  external_urls: string[];
+  captured_at: string;
+  missing_fields: string[];
+  is_verified: boolean;
+  evidence_version: number;
+  sources: BriefSource[];
+  has_dossier: boolean;
+  ai_summary: string;
+  ai_status: string;
+  generated_at: string;
+  model: string;
+}
+

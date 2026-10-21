@@ -32,6 +32,7 @@ from app.providers import HikerAPIClient
 from app.providers.ai import GeminiProvider
 from app.providers.website import WebsiteCrawler
 from app.worker.pipeline import (
+    AIDisabledStage,
     AIDossierStage,
     AIOutreachStage,
     ProfileFetchStage,
@@ -207,6 +208,10 @@ def build_stages(settings: Settings) -> dict[str, Stage]:
             model_name=settings.gemini_model,
             **evidence_kwargs,
         )
+    else:
+        # V2-01: queued AI jobs complete harmlessly when AI is disabled.
+        stages[STAGE_AI_DOSSIER] = AIDisabledStage(STAGE_AI_DOSSIER)
+        stages[STAGE_AI_OUTREACH] = AIDisabledStage(STAGE_AI_OUTREACH)
     return stages
 
 

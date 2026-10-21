@@ -19,10 +19,16 @@ from app import constants
 
 from .errors import DuplicateLeadError
 from .models import (
+    CaptureReceipt as CaptureReceiptORM,
+)
+from .models import (
     ContactRequest as ContactRequestORM,
 )
 from .models import (
     Dossier as DossierORM,
+)
+from .models import (
+    EvidenceVersion as EvidenceVersionORM,
 )
 from .models import (
     Lead as LeadORM,
@@ -47,8 +53,10 @@ from .models import (
 )
 from .progress import derive_research_status, research_remedy
 from .schemas import (
+    CaptureReceipt,
     ContactRequest,
     Dossier,
+    EvidenceVersion,
     Lead,
     LeadPost,
     OutreachEntry,
@@ -141,6 +149,58 @@ class Repository:
             select(LeadORM).where(LeadORM.request_id == request_id)
         )
         return Lead.model_validate(row) if row is not None else None
+
+    # -- capture receipts + evidence versions (V2-02) ----------------------
+
+    def find_capture_receipt(self, request_id: str) -> CaptureReceipt | None:
+        if not request_id:
+            return None
+        row = self.session.get(CaptureReceiptORM, request_id)
+        return CaptureReceipt.model_validate(row) if row is not None else None
+
+    def create_capture_receipt(self, receipt: CaptureReceipt) -> CaptureReceipt:
+        data = receipt.model_dump()
+        data["created_at"] = data.get("created_at") or utc_now_iso()
+        row = CaptureReceiptORM(**data)
+        self.session.add(row)
+        try:
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            existing = self.session.get(CaptureReceiptORM, receipt.request_id)
+            if existing is not None:
+                return CaptureReceipt.model_validate(existing)
+            raise
+        return CaptureReceipt.model_validate(row)
+
+    def latest_evidence_version(self, lead_id: str) -> EvidenceVersion | None:
+        row = self.session.scalar(
+            select(EvidenceVersionORM)
+            .where(EvidenceVersionORM.lead_id == lead_id)
+            .order_by(EvidenceVersionORM.version.desc())
+            .limit(1)
+        )
+        return EvidenceVersion.model_validate(row) if row is not None else None
+
+    def next_evidence_version_number(self, lead_id: str) -> int:
+        latest = self.latest_evidence_version(lead_id)
+        return (latest.version if latest is not None else 0) + 1
+
+    def create_evidence_version(self, version: EvidenceVersion) -> EvidenceVersion:
+        data = version.model_dump()
+        data["created_at"] = data.get("created_at") or utc_now_iso()
+        row = EvidenceVersionORM(**data)
+        self.session.add(row)
+        self.session.commit()
+        return EvidenceVersion.model_validate(row)
+
+    def list_evidence_versions(self, lead_id: str) -> list[EvidenceVersion]:
+        rows = self.session.scalars(
+            select(EvidenceVersionORM)
+            .where(EvidenceVersionORM.lead_id == lead_id)
+            .order_by(EvidenceVersionORM.version)
+        ).all()
+        return [EvidenceVersion.model_validate(row) for row in rows]
 
     def create_or_get_lead(
         self,

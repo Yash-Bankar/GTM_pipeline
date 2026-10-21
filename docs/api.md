@@ -67,10 +67,26 @@ Capture clients (the browser extension) may add a `request_id` and a
 
 Responses:
 
-- `201 Created` — new lead: `{ "created": true, "outcome": "new", "missing_fields": [...], "lead": { ... } }`
+- `201 Created` — new lead: `{ "created": true, "outcome": "new", "research_queued": true, "missing_fields": [...], "lead": { ... } }`
 - `200 OK` — existing lead returned: `{ "created": false, "outcome": "unchanged" | "updated", ... }`
-  (`updated` means the snapshot filled at least one previously-empty field).
+  (`updated` means newer evidence was applied).
+- `409 Conflict` — `request_id` reused with a different payload:
+  `{"detail": {"code": "REQUEST_ID_CONFLICT", ...}}`. Nothing is mutated.
 - `422 Unprocessable Entity` — invalid username/URL or an unknown top-level field.
+
+V2-02 capture semantics:
+
+- A `request_id` writes an immutable **capture receipt**. Replaying the same
+  payload returns the original lead with `outcome="unchanged"` and creates no
+  new evidence version or job.
+- Each accepted capture creates an **immutable evidence version** with the
+  normalized snapshot, parser version, `captured_at`, server `received_at`, and
+  field provenance. `lead.evidence_version` / `evidence_version_id` point at the
+  current version.
+- A client `captured_at` in the future is clamped to the server receipt time;
+  older evidence is retained as history but never overwrites newer evidence.
+- Handle-only with no snapshot and no configured source → `status="needs_data"`
+  with `research_queued=false`. A useful recapture queues research.
 
 There is **no bulk endpoint**: submit one account per request and aggregate the
 results client-side.
@@ -79,8 +95,19 @@ Each returned `lead` also carries a read-only `snapshot` object (or `null` for
 handle-only/HikerAPI leads) with `is_verified`, `external_urls`, the
 `followers`/`following`/`post_count` observations (`value`, `display`,
 `precision`), `source_url`, `captured_at`, `parser_version` and
-`missing_fields`. The snapshot's raw `bio` is intentionally **not** exposed — the
-lead's masked `bio` is returned instead (PRD A24).
+`missing_fields`. `snapshot.bio` is omitted as redundant: the lead's canonical
+`bio` is returned directly. **V2-01:** public business contacts in the bio/page
+text are retained (blanket pre-shortlist masking withdrawn).
+
+Leads also expose `evidence_version` and `evidence_version_id` (the current
+pointer). Submission responses include `research_queued`.
+
+### `GET /api/v1/leads/{lead_id}/brief`
+
+Evidence-only creator brief. Works without AI and without a `dossiers` row
+(`has_dossier=false`, `ai_status="not_generated"`). Returns the bio, counts with
+precision, external URLs, missing fields, website sources, and any existing AI
+summary.
 
 ### `GET /api/v1/leads`
 

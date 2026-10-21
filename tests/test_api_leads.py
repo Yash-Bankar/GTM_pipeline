@@ -216,7 +216,7 @@ def test_repeat_request_id_returns_original_without_new_job(api_client, repo: Re
     assert len(repo.list_jobs(lead_id)) == jobs_after_first
 
 
-def test_snapshot_never_erases_known_values(api_client) -> None:
+def test_newer_snapshot_updates_and_stale_never_erases(api_client) -> None:
     first = api_client.post(
         "/api/v1/leads",
         json={"username": "keep.creator", "request_id": "req-a", "profile_snapshot": _snapshot()},
@@ -232,9 +232,31 @@ def test_snapshot_never_erases_known_values(api_client) -> None:
         },
     )
     assert second.status_code == 200
-    assert second.json()["outcome"] == "unchanged"
-    assert second.json()["lead"]["full_name"] == "Example Creator"
-    assert second.json()["lead"]["bio"] == "Personal finance education."
+    # Newer evidence may update known fields (V2-02).
+    assert second.json()["outcome"] == "updated"
+    assert second.json()["lead"]["full_name"] == "Changed Name"
+    assert second.json()["lead"]["bio"] == "Changed bio"
+
+    # An older snapshot is retained as history but must not mutate the lead.
+    stale = api_client.post(
+        "/api/v1/leads",
+        json={
+            "username": "keep.creator",
+            "request_id": "req-c",
+            "profile_snapshot": _snapshot(
+                display_name="Stale Name",
+                bio="Stale bio",
+                captured_at="2026-10-18T00:00:00Z",
+                external_urls=["https://extra.example/"],
+            ),
+        },
+    )
+    assert stale.status_code == 200
+    body = stale.json()
+    assert body["outcome"] == "unchanged"
+    assert body["lead"]["full_name"] == "Changed Name"
+    assert body["lead"]["bio"] == "Changed bio"
+    assert "https://extra.example/" not in body["lead"]["all_external_urls"]
 
 
 def test_malformed_optional_snapshot_fields_become_missing(api_client) -> None:
@@ -291,8 +313,8 @@ def test_lead_response_exposes_snapshot(api_client) -> None:
     assert lead["snapshot"]["followers"]["precision"] == "approximate"
     assert lead["snapshot"]["external_urls"] == ["https://example.com/"]
     assert set(lead["snapshot"]["missing_fields"]) == {"following", "post_count"}
-    # The raw (unmasked) capture bio is never re-exposed; the lead carries the
-    # masked bio instead (PRD A24).
+    # `snapshot.bio` is redundant; the lead row carries the canonical bio (V2-01
+    # withdrew blanket contact masking).
     assert "bio" not in lead["snapshot"]
 
     detail = api_client.get(f"/api/v1/leads/{lead['lead_id']}/detail").json()

@@ -59,7 +59,8 @@ def test_retry_lead(api_client, seeded) -> None:
     assert response.json()["stage"] == "profile_fetch"
 
 
-def test_retry_ai_enqueues_only_ai_jobs(api_client, seeded, repo: Repository, monkeypatch) -> None:
+def test_retry_ai_enqueues_only_the_dossier(api_client, seeded, repo: Repository, monkeypatch) -> None:
+    """V2-01: retrying AI must not fan out to outreach/draft generation."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     get_settings.cache_clear()
     try:
@@ -67,12 +68,15 @@ def test_retry_ai_enqueues_only_ai_jobs(api_client, seeded, repo: Repository, mo
         assert response.status_code == 200
         body = response.json()
         assert body["lead_id"] == seeded.lead_id
-        assert {job["stage"] for job in body["jobs"]} == {"ai_dossier", "ai_outreach"}
+        assert {job["stage"] for job in body["jobs"]} == {"ai_dossier"}
 
-        # AI jobs are re-queued with a force flag...
+        # The dossier is re-queued with a force flag...
         dossier_job = repo.find_job("ai_dossier", seeded.lead_id)
         assert dossier_job.status == "queued"
         assert json.loads(dossier_job.payload)["force"] is True
+
+        # ...and no outreach/draft job is created.
+        assert repo.find_job("ai_outreach", seeded.lead_id) is None
 
         # ...and the completed profile/media stages are left untouched.
         profile_job = repo.find_job("profile_fetch", seeded.lead_id)

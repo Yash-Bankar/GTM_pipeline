@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app import constants
 from app.config import get_settings
 from app.db.repository import Repository
+from app.leads.schemas import parse_snapshot_out
 from app.db.schemas import (
     Dossier,
     Lead,
@@ -57,6 +58,56 @@ class DashboardService:
             jobs=self._repo.list_jobs(lead_id),
         )
 
+    def lead_brief(self, lead_id: str) -> dict[str, object] | None:
+        """Evidence-only creator brief. Never calls AI or a provider (V2-01)."""
+        lead = self._repo.get_lead(lead_id)
+        if lead is None:
+            return None
+
+        snapshot = parse_snapshot_out(lead.profile_snapshot)
+        dossier = self._repo.get_dossier(lead_id)
+        pages = self._repo.list_website_pages(lead_id)
+
+        urls: list[str] = []
+        for raw in (lead.all_external_urls, lead.external_url):
+            for part in str(raw or "").replace("\n", ",").split(","):
+                value = part.strip()
+                if value and value not in urls:
+                    urls.append(value)
+
+        return {
+            "lead_id": lead.lead_id,
+            "username": lead.username,
+            "full_name": lead.full_name,
+            "bio": lead.bio,
+            "category": lead.business_category_name,
+            "follower_count": lead.follower_count,
+            "follower_display": snapshot.followers.display if snapshot and snapshot.followers else "",
+            "follower_precision": (
+                snapshot.followers.precision if snapshot and snapshot.followers else "unknown"
+            ),
+            "follows_count": lead.follows_count,
+            "external_urls": urls,
+            "captured_at": lead.scraped_at,
+            "missing_fields": snapshot.missing_fields if snapshot else [],
+            "is_verified": snapshot.is_verified if snapshot else False,
+            "evidence_version": lead.evidence_version,
+            "sources": [
+                {
+                    "url": page.resolved_url or page.url,
+                    "title": page.title,
+                    "status": page.status,
+                    "fetched_at": page.fetched_at,
+                }
+                for page in pages
+            ],
+            "has_dossier": dossier is not None,
+            "ai_summary": dossier.summary if dossier else "",
+            "ai_status": dossier.status if dossier else "not_generated",
+            "generated_at": dossier.generated_at if dossier else "",
+            "model": dossier.model if dossier else "",
+        }
+
     def retry_lead(self, lead_id: str) -> PipelineJob | None:
         lead = self._repo.get_lead(lead_id)
         if lead is None:
@@ -72,10 +123,10 @@ class DashboardService:
         return job
 
     def retry_ai(self, lead_id: str) -> list[PipelineJob] | None:
-        """Re-queue the AI stages only (dossier + outreach), forcing regeneration.
+        """Re-queue the AI summary/dossier stage only, forcing regeneration.
 
-        The completed profile-fetch / media / website stages are left untouched.
-        ``ai_dossier`` gets the higher priority so it runs before ``ai_outreach``.
+        V2-01: this must never fan out to outreach or draft generation. Drafts are
+        an explicit, separate operation. Completed research stages are untouched.
         """
         lead = self._repo.get_lead(lead_id)
         if lead is None:
@@ -92,17 +143,7 @@ class DashboardService:
             max_attempts=3,
             on_duplicate="reenqueue",
         )
-        _, outreach_job = self._repo.enqueue(
-            constants.STAGE_AI_OUTREACH,
-            lead_id,
-            lead.username,
-            lead.username_normalized,
-            payload=payload,
-            priority=5,
-            max_attempts=3,
-            on_duplicate="reenqueue",
-        )
-        return [dossier_job, outreach_job]
+        return [dossier_job]
 
     # -- dossiers -----------------------------------------------------------
 

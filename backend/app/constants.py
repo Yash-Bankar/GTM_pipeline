@@ -26,6 +26,8 @@ LEAD_STATUS_QUEUED = "queued"
 LEAD_STATUS_ENRICHED = "enriched"
 LEAD_STATUS_NOT_FOUND = "not_found"
 LEAD_STATUS_ERROR = "error"
+# Handle-only capture with no supported research source (V2-02).
+LEAD_STATUS_NEEDS_DATA = "needs_data"
 
 # Optional-stage statuses (lead `mediaStatus` / `websiteStatus`)
 STAGE_STATUS_DONE = "done"

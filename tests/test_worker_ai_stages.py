@@ -49,7 +49,7 @@ def _outreach_job(repo: Repository, name: str):
     return lead, repo.claim_next(worker_id="w1")
 
 
-def test_dossier_stage_generates_and_enqueues_outreach(repo: Repository) -> None:
+def test_dossier_stage_generates_without_scheduling_outreach(repo: Repository) -> None:
     lead, job = _dossier_job(repo, "ai.one")
     _seed_evidence(repo, lead)
     provider = FakeAIProvider(dossier=_full_score_draft())
@@ -62,7 +62,9 @@ def test_dossier_stage_generates_and_enqueues_outreach(repo: Repository) -> None
     assert dossier.qualification_score == 100
     assert dossier.qualification_tier == "A"
     assert dossier.summary == "Finance educator."
-    assert repo.find_job("ai_outreach", lead.lead_id) is not None
+    # V2-01: dossier completion must not schedule outreach/draft work.
+    assert repo.find_job("ai_outreach", lead.lead_id) is None
+    assert provider.calls == 1  # exactly the dossier call
 
 
 def test_dossier_stage_insufficient_evidence_skips_ai(repo: Repository) -> None:

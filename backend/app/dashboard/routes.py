@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app import constants
 from app.config import get_settings
 from app.dashboard.schemas import (
+    BriefOut,
     DossierListOut,
     DossierOut,
     IntegrationsStatusOut,
@@ -201,3 +202,18 @@ def integrations_status(
     service: DashboardService = Depends(get_dashboard_service),
 ) -> IntegrationsStatusOut:
     return IntegrationsStatusOut(**service.integrations_status())
+
+
+@router.get("/leads/{lead_id}/brief", response_model=BriefOut)
+def lead_brief(
+    lead_id: str,
+    service: DashboardService = Depends(get_dashboard_service),
+) -> BriefOut:
+    """Evidence-only creator brief; works without AI or a dossier row."""
+    brief = service.lead_brief(lead_id)
+    if brief is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    return BriefOut(**brief)

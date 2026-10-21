@@ -165,9 +165,13 @@ versions.
   `NEEDS_REVIEW` output already exists).
 - Qualification scoring is deterministic from the rubric — compute it in code,
   not in the prompt.
-- **Mask contacts before approval (T06/A24):** normalize bio text and mask email/
-  phone patterns (`app.ai.masking`) in persisted evidence and AI inputs; never
-  populate `business_email`/`business_phone_number` from a snapshot.
+- **Public contacts (V2-01, supersedes T06/A24):** blanket pre-shortlist contact
+  masking is withdrawn. Retain publicly available business contacts from the bio/
+  page text and show them to authenticated operators. Credentials, private data
+  and unrelated page content remain excluded.
+- **No unintended work (V2-01):** dossier completion never schedules outreach or
+  draft generation; shortlisting never schedules discovery or generation. AI
+  summary and draft generation are explicit actions.
 
 ## Dashboard rules (Phase 7)
 

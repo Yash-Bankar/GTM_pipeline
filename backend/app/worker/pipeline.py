@@ -15,7 +15,6 @@ from typing import Protocol
 
 from app import constants
 from app.ai import AIService, Evidence, build_evidence
-from app.ai.masking import mask_contact_patterns
 from app.ai.service import DossierResult
 from app.db.repository import Repository
 from app.db.schemas import Dossier, Lead, LeadPost, OutreachEntry, PipelineJob, WebsitePage
@@ -437,7 +436,7 @@ class WebsiteEnrichStage:
                     resolved_url=page.resolved_url,
                     domain=page.domain,
                     title=page.title,
-                    text=mask_contact_patterns(page.text),
+                    text=page.text,
                     links=_serialize_links(page.links),
                     http_status=page.http_status,
                     status=page.status,
@@ -533,13 +532,7 @@ class AIDossierStage:
             return StageOutcome(ok=False, error=_error_text(exc), retryable=False)
 
         self._store_dossier(repo, job, lead, evidence, result, status=constants.AI_STATUS_NEEDS_REVIEW, error="")
-        repo.enqueue(
-            constants.STAGE_AI_OUTREACH,
-            job.lead_id,
-            lead.username,
-            lead.username_normalized,
-            max_attempts=self._followup_max_attempts,
-        )
+        # V2-01: dossier completion must never schedule outreach/draft work.
         return StageOutcome(
             ok=True,
             result=json.dumps({"score": result.score, "tier": result.tier, "status": constants.AI_STATUS_NEEDS_REVIEW}),
@@ -662,3 +655,19 @@ class AIOutreachStage:
             )
         )
         return StageOutcome(ok=True, result=constants.AI_STATUS_NEEDS_REVIEW)
+
+
+class AIDisabledStage:
+    """Completes a queued AI job without a provider call when AI is disabled.
+
+    V2-01: a queued AI job that encounters a capability change (AI disabled) must
+    not fail as an unregistered stage. Research, the creator brief, and the manual
+    workflow remain fully usable.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def run(self, job: PipelineJob, repo: Repository) -> StageOutcome:
+        logger.info("AI stage %s skipped for lead %s: AI disabled", job.stage, job.lead_id)
+        return StageOutcome(ok=True, result="AI disabled; no provider call")

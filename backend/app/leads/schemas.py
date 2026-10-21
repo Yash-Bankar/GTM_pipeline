@@ -98,10 +98,9 @@ class LeadCreateRequest(BaseModel):
 class ProfileSnapshotOut(BaseModel):
     """Read-only view of a captured snapshot for the dashboard (PRD T07).
 
-    Deliberately excludes ``bio``: the lead's already-masked ``bio`` is shown
-    instead, so unmasked contact patterns are never re-exposed before approval
-    (PRD A24). ``CountObservation`` keeps the original display text and precision
-    so unknown counts stay unknown.
+    ``bio`` is omitted because the lead row already carries the canonical bio.
+    V2-01 withdrew blanket pre-shortlist contact masking, so public contact
+    details in the bio/page text are retained.
     """
 
     is_verified: bool = False
@@ -163,6 +162,8 @@ class LeadResponse(BaseModel):
     fit_status: str = "not_reviewed"
     fit_note: str = ""
     fit_decided_at: str = ""
+    evidence_version: int = 0
+    evidence_version_id: str = ""
 
     @classmethod
     def from_lead(
@@ -198,6 +199,8 @@ class LeadResponse(BaseModel):
             fit_status=lead.fit_status or "not_reviewed",
             fit_note=lead.fit_note,
             fit_decided_at=lead.fit_decided_at,
+            evidence_version=lead.evidence_version,
+            evidence_version_id=lead.evidence_version_id,
         )
 
 
@@ -213,6 +216,7 @@ class LeadSubmissionResponse(BaseModel):
     lead: LeadResponse
     outcome: str = "new"
     missing_fields: list[str] = []
+    research_queued: bool = False
 
 
 class LeadListResponse(BaseModel):

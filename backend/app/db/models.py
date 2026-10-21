@@ -42,6 +42,9 @@ class Lead(Base):
     # plus the client-generated request id used for idempotent retries.
     profile_snapshot: Mapped[str] = mapped_column(Text, default="")
     request_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # Current evidence pointer (V2-02). Versions themselves are immutable rows.
+    evidence_version: Mapped[int] = mapped_column(Integer, default=0)
+    evidence_version_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     # Fit-decision dimension (PRD T08). Independent of research progress.
     fit_status: Mapped[str] = mapped_column(String(32), default="not_reviewed", index=True)
     fit_note: Mapped[str] = mapped_column(Text, default="")
@@ -239,3 +242,45 @@ class WorkerHeartbeat(Base):
     worker_id: Mapped[str] = mapped_column(String(64), default="")
     beat_at: Mapped[str] = mapped_column(String(40), default="", index=True)
     updated_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class CaptureReceipt(Base):
+    """Immutable record of an acknowledged capture request (V2-02).
+
+    Keyed by the client request id. Reusing an id with a different payload is a
+    conflict; replaying the same payload returns this receipt's lead without work.
+    """
+
+    __tablename__ = "capture_receipts"
+
+    request_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    payload_hash: Mapped[str] = mapped_column(String(64), default="")
+    outcome: Mapped[str] = mapped_column(String(32), default="")
+    received_at: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class EvidenceVersion(Base):
+    """Immutable normalized snapshot captured for a lead (V2-02)."""
+
+    __tablename__ = "evidence_versions"
+    __table_args__ = (
+        UniqueConstraint("lead_id", "version", name="uq_evidence_versions_lead_version"),
+    )
+
+    evidence_version_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    request_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    snapshot_json: Mapped[str] = mapped_column(Text, default="")
+    captured_at: Mapped[str] = mapped_column(String(40), default="")
+    received_at: Mapped[str] = mapped_column(String(40), default="", index=True)
+    parser_version: Mapped[str] = mapped_column(String(32), default="")
+    field_provenance: Mapped[str] = mapped_column(Text, default="")
+    changed_fields: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[str] = mapped_column(String(40), default="")

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from app.ai.masking import mask_contact_patterns, normalize_bio
+from app.ai.masking import normalize_bio
 
 __all__ = ["parse_snapshot", "snapshot_has_data", "snapshot_to_lead_fields"]
 
@@ -55,7 +55,8 @@ def snapshot_to_lead_fields(snapshot: dict) -> dict[str, object]:
     if display_name:
         fields["full_name"] = display_name
 
-    bio = mask_contact_patterns(normalize_bio(snapshot.get("bio") or ""))
+    # V2-01 policy: public business contacts are retained (no blanket masking).
+    bio = normalize_bio(snapshot.get("bio") or "")
     if bio:
         fields["bio"] = bio
 

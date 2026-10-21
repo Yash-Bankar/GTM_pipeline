@@ -8,10 +8,24 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlunparse
 
 from app import constants
+from app.config import get_settings
 from app.db.repository import Repository
-from app.db.schemas import ContactRequest, Lead, OutreachRevision
+from app.db.schemas import (
+    CaptureReceipt,
+    ContactRequest,
+    EvidenceVersion,
+    Lead,
+    OutreachRevision,
+)
 from app.db.util import new_job_id, utc_now_iso
 
+from .evidence import (
+    changed_snapshot_fields,
+    field_provenance,
+    merge_snapshot,
+    payload_hash,
+    recency,
+)
 from .schemas import (
     COUNT_PRECISIONS,
     LEAD_STATUS_QUEUED,
@@ -46,6 +60,7 @@ class LeadSubmission:
     remedy: str = ""
     outcome: str = "new"
     missing_fields: list[str] = field(default_factory=list)
+    research_queued: bool = False
 
 
 class FitNotApprovedError(Exception):
@@ -56,77 +71,199 @@ class FitNotApprovedError(Exception):
         self.fit_status = fit_status
 
 
+class RequestIdConflictError(Exception):
+    """Raised when a request id is reused with a different payload (V2-02)."""
+
+    def __init__(self, request_id: str) -> None:
+        super().__init__(request_id)
+        self.request_id = request_id
+
+
 class LeadService:
     def __init__(self, repo: Repository) -> None:
         self._repo = repo
 
     def submit(self, request: LeadCreateRequest) -> LeadSubmission:
-        """Create a lead or return the existing one (deduplicated), then enqueue it.
+        """Capture a lead with receipts, evidence versions, and a safe merge (V2-02).
 
-        Backward compatible with handle-only clients. When a ``profile_snapshot``
-        is supplied it is sanitized, persisted, and used to fill only *missing*
-        lead fields (known values are never erased). A repeated ``request_id``
-        returns the original lead without re-enqueuing work.
+        - A request id is unique: replaying the same payload returns the original
+          lead without work; reusing it with a different payload raises a conflict.
+        - A snapshot becomes an immutable evidence version. Newer evidence may
+          update known fields; stale evidence only fills gaps and never erases.
+        - Handle-only intake becomes ``needs_data`` unless a research source is
+          configured (snapshot or HikerAPI).
         """
         parsed = parse_lead_input(request.username)
+        source = request.source or "api"
+        sanitized = (
+            _sanitize_snapshot(request.profile_snapshot)
+            if request.profile_snapshot is not None
+            else None
+        )
+        digest = payload_hash(parsed.normalized, source, sanitized)
 
         if request.request_id:
-            existing = self._repo.find_lead_by_request_id(request.request_id)
-            if existing is not None:
-                progress, remedy = self._repo.lead_progress(existing.lead_id)
-                return LeadSubmission(
-                    created=False,
-                    lead=existing,
-                    progress=progress,
-                    remedy=remedy,
-                    outcome="unchanged",
-                )
+            receipt = self._repo.find_capture_receipt(request.request_id)
+            if receipt is not None:
+                if receipt.payload_hash and receipt.payload_hash != digest:
+                    raise RequestIdConflictError(request.request_id)
+                existing = self._repo.get_lead(receipt.lead_id)
+                if existing is not None:
+                    progress, remedy = self._repo.lead_progress(existing.lead_id)
+                    return LeadSubmission(
+                        created=False,
+                        lead=existing,
+                        progress=progress,
+                        remedy=remedy,
+                        outcome="unchanged",
+                        missing_fields=_snapshot_missing(existing),
+                    )
+            else:
+                # Leads captured before V2-02 have a request id but no receipt.
+                legacy = self._repo.find_lead_by_request_id(request.request_id)
+                if legacy is not None:
+                    progress, remedy = self._repo.lead_progress(legacy.lead_id)
+                    return LeadSubmission(
+                        created=False,
+                        lead=legacy,
+                        progress=progress,
+                        remedy=remedy,
+                        outcome="unchanged",
+                        missing_fields=_snapshot_missing(legacy),
+                    )
 
+        hiker_configured = bool(get_settings().hikerapi_key.strip())
+        can_research = sanitized is not None or hiker_configured
+        initial_status = (
+            LEAD_STATUS_QUEUED if can_research else constants.LEAD_STATUS_NEEDS_DATA
+        )
         created, lead = self._repo.create_or_get_lead(
             parsed.username,
-            source=request.source or "api",
-            status=LEAD_STATUS_QUEUED,
+            source=source,
+            status=initial_status,
             profile_url=parsed.profile_url,
         )
 
-        outcome = "new" if created else "unchanged"
+        received_at = utc_now_iso()
+        applied = False
+        changed: list[str] = []
         missing: list[str] = []
 
-        if request.profile_snapshot is not None:
-            snapshot = _sanitize_snapshot(request.profile_snapshot)
-            missing = snapshot["missing_fields"]
-            before = _evidence_signature(lead)
-            fields = _fields_to_fill(lead, snapshot)
-            fields["profile_snapshot"] = json.dumps(snapshot, ensure_ascii=False)
-            if request.request_id:
-                fields["request_id"] = request.request_id
-            updated = self._repo.update_lead(lead.lead_id, fields)
-            if updated is not None:
-                lead = updated
-            if not created and _evidence_signature(lead) != before:
-                outcome = "updated"
-        elif request.request_id:
-            updated = self._repo.update_lead(lead.lead_id, {"request_id": request.request_id})
-            if updated is not None:
-                lead = updated
+        if sanitized is not None:
+            latest = self._repo.latest_evidence_version(lead.lead_id)
+            current_snapshot = _snapshot_dict(lead.profile_snapshot)
+            encoded = _canonical_json(json.dumps(sanitized, ensure_ascii=False))
+            identical = latest is not None and _canonical_json(
+                latest.snapshot_json
+            ) == encoded
 
+            if identical:
+                # Identical evidence creates no duplicate version or work.
+                missing = sanitized.get("missing_fields", [])
+                outcome = "new" if created else "unchanged"
+            else:
+                if latest is None:
+                    incoming_newer = True
+                else:
+                    incoming_newer = recency(sanitized, received_at) >= recency(
+                        current_snapshot, latest.received_at
+                    )
+                merged = merge_snapshot(
+                    current_snapshot, sanitized, incoming_newer=incoming_newer
+                )
+                changed = changed_snapshot_fields(current_snapshot, merged)
+                missing = (
+                    merged.get("missing_fields", [])
+                    if incoming_newer
+                    else _snapshot_missing(lead)
+                )
+
+                version_number = self._repo.next_evidence_version_number(lead.lead_id)
+                version = EvidenceVersion(
+                    evidence_version_id=new_job_id("ev"),
+                    lead_id=lead.lead_id,
+                    version=version_number,
+                    request_id=request.request_id,
+                    snapshot_json=encoded,
+                    captured_at=str(sanitized.get("captured_at") or ""),
+                    received_at=received_at,
+                    parser_version=str(sanitized.get("parser_version") or ""),
+                    field_provenance=json.dumps(
+                        field_provenance(sanitized), sort_keys=True
+                    ),
+                    changed_fields=json.dumps(changed),
+                )
+                self._repo.create_evidence_version(version)
+
+                if incoming_newer:
+                    fields = _snapshot_lead_fields(merged)
+                    fields["profile_snapshot"] = json.dumps(merged, ensure_ascii=False)
+                    if request.request_id:
+                        fields["request_id"] = request.request_id
+                    fields["evidence_version"] = version_number
+                    fields["evidence_version_id"] = version.evidence_version_id
+                    lead = self._repo.update_lead(lead.lead_id, fields) or lead
+                    applied = bool(changed)
+                # Stale evidence is retained as immutable history but does not
+                # mutate the lead or advance the current evidence pointer.
+                outcome = (
+                    "new"
+                    if created
+                    else ("updated" if incoming_newer and applied and changed else "unchanged")
+                )
+        else:
+            outcome = "new" if created else "unchanged"
+            if request.request_id:
+                lead = (
+                    self._repo.update_lead(
+                        lead.lead_id, {"request_id": request.request_id}
+                    )
+                    or lead
+                )
+
+        research_queued = False
         if created:
+            if can_research:
+                self._repo.enqueue(
+                    constants.STAGE_PROFILE_FETCH,
+                    lead.lead_id,
+                    lead.username,
+                    lead.username_normalized,
+                    max_attempts=3,
+                )
+                research_queued = True
+        elif applied and changed and can_research:
+            # A useful recapture restarts research for the new evidence version.
             self._repo.enqueue(
                 constants.STAGE_PROFILE_FETCH,
                 lead.lead_id,
                 lead.username,
                 lead.username_normalized,
                 max_attempts=3,
+                on_duplicate="reenqueue",
+            )
+            research_queued = True
+
+        if request.request_id:
+            self._repo.create_capture_receipt(
+                CaptureReceipt(
+                    request_id=request.request_id,
+                    lead_id=lead.lead_id,
+                    payload_hash=digest,
+                    outcome=outcome,
+                    received_at=received_at,
+                )
             )
 
         progress, remedy = self._repo.lead_progress(lead.lead_id)
         logger.info(
-            "Lead submission @%s -> %s (leadId=%s, progress=%s, outcome=%s)",
+            "Lead submission @%s -> %s (leadId=%s, progress=%s, outcome=%s, research=%s)",
             parsed.normalized,
             "created" if created else "existing",
             lead.lead_id,
             progress,
             outcome,
+            research_queued,
         )
         return LeadSubmission(
             created=created,
@@ -135,6 +272,7 @@ class LeadService:
             remedy=remedy,
             outcome=outcome,
             missing_fields=missing,
+            research_queued=research_queued,
         )
 
     def get(self, lead_id: str) -> tuple[Lead, str, str] | None:
@@ -332,51 +470,62 @@ def _effective_missing(
     return sorted(missing)
 
 
-def _fields_to_fill(lead: Lead, snapshot: dict[str, object]) -> dict[str, object]:
-    """Fill only fields the lead does not already have (never erase known values)."""
+def _snapshot_lead_fields(snapshot: dict[str, object]) -> dict[str, object]:
+    """Map a merged snapshot to lead columns (non-empty values only)."""
     fields: dict[str, object] = {}
-    if not lead.full_name and snapshot["display_name"]:
-        fields["full_name"] = snapshot["display_name"]
-    if not lead.bio and snapshot["bio"]:
-        fields["bio"] = snapshot["bio"]
+    display_name = str(snapshot.get("display_name") or "").strip()
+    if display_name:
+        fields["full_name"] = display_name
+    bio = str(snapshot.get("bio") or "").strip()
+    if bio:
+        fields["bio"] = bio
 
-    urls = snapshot["external_urls"]
+    urls = snapshot.get("external_urls")
     if isinstance(urls, list) and urls:
-        if not lead.external_url:
-            fields["external_url"] = urls[0]
-        if not lead.all_external_urls:
-            fields["all_external_urls"] = ",".join(str(url) for url in urls)
+        fields["external_url"] = urls[0]
+        fields["all_external_urls"] = ",".join(str(url) for url in urls)
 
-    if lead.follower_count == 0:
-        value = _count_value(snapshot.get("followers"))
-        if value is not None:
-            fields["follower_count"] = value
-    if lead.follows_count == 0:
-        value = _count_value(snapshot.get("following"))
-        if value is not None:
-            fields["follows_count"] = value
+    followers = _count_value(snapshot.get("followers"))
+    if followers is not None:
+        fields["follower_count"] = followers
+    following = _count_value(snapshot.get("following"))
+    if following is not None:
+        fields["follows_count"] = following
 
-    if not lead.profile_url and snapshot["source_url"]:
-        fields["profile_url"] = snapshot["source_url"]
-    if snapshot["captured_at"]:
-        fields["scraped_at"] = snapshot["captured_at"]
+    source_url = str(snapshot.get("source_url") or "").strip()
+    if source_url:
+        fields["profile_url"] = source_url
+    captured_at = str(snapshot.get("captured_at") or "").strip()
+    if captured_at:
+        fields["scraped_at"] = captured_at
     return fields
+
+
+def _snapshot_dict(raw: str) -> dict[str, object]:
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _canonical_json(raw: str) -> str:
+    try:
+        return json.dumps(json.loads(raw or "{}"), sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return raw or ""
+
+
+def _snapshot_missing(lead: Lead) -> list[str]:
+    fields = _snapshot_dict(lead.profile_snapshot).get("missing_fields")
+    if isinstance(fields, list):
+        return [str(field) for field in fields]
+    return []
 
 
 def _count_value(observation: object) -> int | None:
     if isinstance(observation, dict):
         value = observation.get("value")
-        if isinstance(value, int) and value >= 0:
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             return value
     return None
-
-
-def _evidence_signature(lead: Lead) -> tuple[object, ...]:
-    return (
-        lead.full_name,
-        lead.bio,
-        lead.external_url,
-        lead.all_external_urls,
-        lead.follower_count,
-        lead.follows_count,
-    )

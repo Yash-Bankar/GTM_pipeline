@@ -14,8 +14,10 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from .util import normalize_username  # re-exported for callers
 
 __all__ = [
+    "CaptureReceipt",
     "ContactRequest",
     "Dossier",
+    "EvidenceVersion",
     "Lead",
     "LeadPost",
     "OutreachEntry",
@@ -75,6 +77,8 @@ class Lead(RowModel):
     last_error: str = ""
     profile_snapshot: str = ""
     request_id: str = ""
+    evidence_version: IntField = 0
+    evidence_version_id: str = ""
     fit_status: str = "not_reviewed"
     fit_note: str = ""
     fit_decided_at: str = ""
@@ -222,3 +226,30 @@ class WorkerHeartbeat(RowModel):
     worker_id: str = ""
     beat_at: str = ""
     updated_at: str = ""
+
+
+class CaptureReceipt(RowModel):
+    """A row in `capture_receipts`."""
+
+    request_id: str = ""
+    lead_id: str = ""
+    payload_hash: str = ""
+    outcome: str = ""
+    received_at: str = ""
+    created_at: str = ""
+
+
+class EvidenceVersion(RowModel):
+    """A row in `evidence_versions` (immutable)."""
+
+    evidence_version_id: str = ""
+    lead_id: str = ""
+    version: IntField = 1
+    request_id: str = ""
+    snapshot_json: str = ""
+    captured_at: str = ""
+    received_at: str = ""
+    parser_version: str = ""
+    field_provenance: str = ""
+    changed_fields: str = ""
+    created_at: str = ""

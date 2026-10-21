@@ -17,7 +17,7 @@ from app.leads.schemas import (
     OutreachRevisionListOut,
     OutreachRevisionOut,
 )
-from app.leads.service import FitNotApprovedError, LeadService
+from app.leads.service import FitNotApprovedError, LeadService, RequestIdConflictError
 
 router = APIRouter(
     prefix="/api/v1",
@@ -37,7 +37,19 @@ def submit_lead(
     response: Response,
     service: LeadService = Depends(get_lead_service),
 ) -> LeadSubmissionResponse:
-    submission = service.submit(payload)
+    try:
+        submission = service.submit(payload)
+    except RequestIdConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "REQUEST_ID_CONFLICT",
+                "message": (
+                    f"Request id '{exc.request_id}' was already used with a "
+                    "different payload."
+                ),
+            },
+        ) from exc
     if not submission.created:
         response.status_code = status.HTTP_200_OK
     return LeadSubmissionResponse(
@@ -47,6 +59,7 @@ def submit_lead(
         ),
         outcome=submission.outcome,
         missing_fields=submission.missing_fields,
+        research_queued=submission.research_queued,
     )
 
 

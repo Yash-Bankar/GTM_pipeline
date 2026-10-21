@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .masking import mask_contact_patterns
-
 
 @dataclass
 class PageEvidence:
@@ -65,7 +63,7 @@ def build_evidence(
                 urls.append(url)
 
     posts = [
-        mask_contact_patterns(str(row.get("caption", "")).strip()[:text_chars])
+        str(row.get("caption", "")).strip()[:text_chars]
         for row in post_rows[:max_posts]
         if str(row.get("caption", "")).strip()
     ]
@@ -73,7 +71,7 @@ def build_evidence(
         PageEvidence(
             url=str(row.get("url", "")),
             title=str(row.get("title", ""))[:300],
-            text=mask_contact_patterns(str(row.get("text", ""))[:text_chars]),
+            text=str(row.get("text", ""))[:text_chars],
         )
         for row in page_rows[:max_pages]
         if str(row.get("text", "")).strip() or str(row.get("title", "")).strip()
@@ -88,7 +86,7 @@ def build_evidence(
         lead_id=str(lead_values.get("lead_id", "")),
         username=str(lead_values.get("username", "")),
         full_name=str(lead_values.get("full_name", "")),
-        bio=mask_contact_patterns(str(lead_values.get("bio", ""))[:text_chars]),
+        bio=str(lead_values.get("bio", ""))[:text_chars],
         category=str(lead_values.get("business_category_name", "")),
         follower_count=followers,
         business_email=str(lead_values.get("business_email", "")),

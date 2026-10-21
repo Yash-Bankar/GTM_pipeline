@@ -230,3 +230,35 @@ class IntegrationsStatusOut(BaseModel):
     gemini: Literal["configured", "disabled"]
     hikerapi: Literal["configured", "disabled"]
     worker_last_beat_at: str = ""
+
+
+class BriefSourceOut(BaseModel):
+    url: str
+    title: str
+    status: str
+    fetched_at: str
+
+
+class BriefOut(BaseModel):
+    """An evidence-only creator brief. Never requires an AI call (V2-01/V2-04)."""
+
+    lead_id: str
+    username: str
+    full_name: str
+    bio: str
+    category: str
+    follower_count: int
+    follower_display: str = ""
+    follower_precision: str = "unknown"
+    follows_count: int
+    external_urls: list[str] = Field(default_factory=list)
+    captured_at: str = ""
+    missing_fields: list[str] = Field(default_factory=list)
+    is_verified: bool = False
+    sources: list[BriefSourceOut] = Field(default_factory=list)
+    evidence_version: int = 0
+    has_dossier: bool = False
+    ai_summary: str = ""
+    ai_status: str = "not_generated"
+    generated_at: str = ""
+    model: str = ""
