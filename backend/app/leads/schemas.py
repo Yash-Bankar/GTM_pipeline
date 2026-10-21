@@ -168,10 +168,17 @@ class LeadResponse(BaseModel):
     evidence_version: int = 0
     evidence_version_id: str = ""
     research_status: str = "needs_data"
+    # Contact types available for this creator (contact indicator). V2-08.
+    contact_types: list[str] = []
 
     @classmethod
     def from_lead(
-        cls, lead: Lead, *, progress: str = "needs_data", remedy: str = ""
+        cls,
+        lead: Lead,
+        *,
+        progress: str = "needs_data",
+        remedy: str = "",
+        contact_types: list[str] | None = None,
     ) -> "LeadResponse":
         return cls(
             lead_id=lead.lead_id,
@@ -209,6 +216,7 @@ class LeadResponse(BaseModel):
             evidence_version=lead.evidence_version,
             evidence_version_id=lead.evidence_version_id,
             research_status=progress,
+            contact_types=list(contact_types or []),
         )
 
 
@@ -234,6 +242,10 @@ class LeadListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    # Saved view the page was rendered for, and the per-view counters
+    # (labelled, not an additive funnel). V2-08.
+    view: str = "to_review"
+    view_counts: dict[str, int] = {}
 
 
 class FitDecisionRequest(BaseModel):

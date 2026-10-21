@@ -108,7 +108,7 @@ export function OutreachLogForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg border border-accent-600/60 bg-accent-600/15 px-4 py-2 text-sm font-semibold text-accent-200 transition-colors hover:bg-accent-600/25 disabled:cursor-not-allowed disabled:opacity-50"
+          className=" focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400rounded-lg border border-accent-600/60 bg-accent-600/15 px-4 py-2 text-sm font-semibold text-accent-200 transition-colors hover:bg-accent-600/25 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {pending ? "Logging…" : correctionTarget ? "Save correction" : "Log sent"}
         </button>

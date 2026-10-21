@@ -109,7 +109,7 @@ export function OutreachGates({
         onClick={() => run(() => requestContact(leadId, searchAgain))}
         disabled={disabled}
         {...gateProps}
-        className={cn(BUTTON, "w-full border border-ink-600 text-mist-200 hover:bg-ink-800")}
+        className={cn("focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400", BUTTON, "w-full border border-ink-600 text-mist-200 hover:bg-ink-800")}
       >
         {searchAgain ? "Search again" : "Find contact details"}
       </button>
@@ -140,7 +140,7 @@ export function OutreachGates({
           onClick={() => run(() => requestDraft(leadId, channel))}
           disabled={disabled}
           {...gateProps}
-          className={cn(BUTTON, "shrink-0 bg-accent-500 text-ink-950 hover:bg-accent-400")}
+          className={cn("focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400", BUTTON, "shrink-0 bg-accent-500 text-ink-950 hover:bg-accent-400")}
         >
           Generate Draft
         </button>

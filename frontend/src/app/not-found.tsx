@@ -6,7 +6,7 @@ export default function NotFound() {
       <p className="font-mono text-sm text-accent-300">404</p>
       <h1 className="text-xl font-semibold text-mist-100">Not found</h1>
       <p className="text-sm text-mist-400">That lead, dossier or draft does not exist.</p>
-      <Link href="/leads" className="mt-2 text-sm text-accent-300 underline-offset-2 hover:underline">
+      <Link href="/creators" className="mt-2 text-sm text-accent-300 underline-offset-2 hover:underline">
         Back to leads
       </Link>
     </main>

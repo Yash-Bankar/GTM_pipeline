@@ -123,16 +123,57 @@ source).
 
 ### `GET /api/v1/leads`
 
-Paginated listing with optional search and status filter.
+Paginated listing with a saved creator view, search and status filter (V2-08).
 
 | Query | Default | Notes |
 | --- | --- | --- |
-| `limit` | 50 | 1–500 |
-| `offset` | 0 | ≥ 0 |
-| `q` | – | case-insensitive search over username, full name, bio, email |
-| `status` | – | filter by lead status (e.g. `queued`, `done`) |
+| `limit` | 50 | 1-500 |
+| `offset` | 0 | >= 0 |
+| `q` | - | case-insensitive search over username, full name, bio, email |
+| `status` | - | filter by derived research progress (e.g. `queued`, `complete`) |
+| `view` | `to_review` | saved creator view (see below); an unknown value falls back to `to_review` |
+| `sort` | - | `oldest` / `newest`; the default orders the review queue **oldest unreviewed first** |
 
-Response: `{ "items": [...], "total": 12, "limit": 50, "offset": 0 }`, newest first.
+**Saved views** (PRD 6.2):
+
+| View | Contents |
+| --- | --- |
+| `to_review` | `not_reviewed` plus shortlisters with `decision_currency == "review_needed"`. **Excludes `rejected`.** |
+| `all` | Every captured creator |
+| `research_more` | `fit_status == "research_more"` |
+| `shortlisted` | `fit_status == "shortlisted"` (any decision currency) |
+| `rejected` | `fit_status == "rejected"` |
+| `attention` | Derived research progress is `blocked` |
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "lead_id": "ld_...",
+      "username": "creator",
+      "fit_status": "shortlisted",
+      "decision_currency": "current",
+      "contact_types": ["email"]
+    }
+  ],
+  "total": 8,
+  "limit": 50,
+  "offset": 0,
+  "view": "to_review",
+  "view_counts": {
+    "to_review": 8, "all": 9, "research_more": 0,
+    "shortlisted": 1, "rejected": 0, "attention": 0
+  }
+}
+```
+
+- `view_counts` are **labelled per view**, not a single additive funnel: a
+  creator may appear in an operational view *and* a decision view, so the
+  counts are never summed.
+- `contact_types` lists the contact types available for the creator (the
+  contact indicator); it is `[]` when no contact is known.
 
 ### `GET /api/v1/leads/{lead_id}`
 

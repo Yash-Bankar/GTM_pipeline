@@ -55,7 +55,7 @@ export function OutreachEditor({
             name="status"
             value={button.value}
             disabled={pending}
-            className={cn(
+            className={cn("focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400", 
               "rounded-lg border px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               button.className,
             )}

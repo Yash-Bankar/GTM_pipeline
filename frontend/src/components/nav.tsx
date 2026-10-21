@@ -7,9 +7,8 @@ import { logout } from "@/actions/auth";
 import { cn } from "@/components/ui";
 
 export const NAV_LINKS = [
-  { href: "/leads", label: "Leads", glyph: "◎", hint: "Pipeline & enrichment" },
-  { href: "/dossiers", label: "Dossiers", glyph: "❖", hint: "AI research" },
-  { href: "/outreach", label: "Outreach", glyph: "✉", hint: "Draft review" },
+  { href: "/creators", label: "Creators", glyph: "◎", hint: "Review queue" },
+  { href: "/outreach", label: "Outreach", glyph: "✉", hint: "Drafts & history" },
   { href: "/settings", label: "Settings", glyph: "⚙", hint: "System health" },
 ];
 
@@ -20,7 +19,7 @@ export function Nav() {
   return (
     <aside className="sticky top-5 hidden h-[calc(100dvh-2.5rem)] w-64 shrink-0 flex-col justify-between rounded-2xl border border-white/10 bg-ink-900/50 p-4 shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl lg:flex">
       <div>
-        <Link href="/leads" className="flex items-center gap-3 px-2 py-2">
+        <Link href="/creators" className="flex items-center gap-3 px-2 py-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-500/15 text-lg font-bold text-accent-300">
             S
           </span>
@@ -61,7 +60,7 @@ export function Nav() {
       <form action={logout}>
         <button
           type="submit"
-          className="w-full rounded-xl border border-ink-700 px-3 py-2 text-left text-xs text-mist-400 transition-colors hover:border-rose-alert/40 hover:text-rose-alert"
+          className=" focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400w-full rounded-xl border border-ink-700 px-3 py-2 text-left text-xs text-mist-400 transition-colors hover:border-rose-alert/40 hover:text-rose-alert"
         >
           Sign out
         </button>

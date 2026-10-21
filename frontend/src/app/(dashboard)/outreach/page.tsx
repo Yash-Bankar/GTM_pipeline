@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Card, CardHeader, EmptyState, ErrorState, PageHeader, StatusBadge } from "@/components/ui";
+import { LiveRefresh } from "@/components/view-switcher";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
@@ -26,16 +27,21 @@ export default async function OutreachPage({ searchParams }: { searchParams: Sea
 
   return (
     <>
-      <PageHeader
-        title="Outreach"
-        description="AI-generated email and DM drafts. Nothing is sent — review, edit, approve or reject."
-      />
+        <PageHeader
+          title="Outreach"
+          description="Drafts and manual history. Nothing is sent from here — log what you send."
+        />
+
 
       {errorMessage || !data ? (
         <ErrorState title="Could not load outreach" message={errorMessage ?? "No data returned."} />
       ) : (
         <Card>
-          <CardHeader title="Drafts" subtitle={`${data.total} draft${data.total === 1 ? "" : "s"}`} />
+          <CardHeader
+            title="Drafts"
+            subtitle={`${data.total} draft${data.total === 1 ? "" : "s"}`}
+            actions={<LiveRefresh pending={false} />}
+          />
           <div className="border-b border-ink-800 px-5 py-3">
             <form method="get" action="/outreach" className="flex flex-wrap items-end gap-2">
               <div className="sm:min-w-[12rem]">

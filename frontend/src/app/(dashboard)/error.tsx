@@ -22,7 +22,7 @@ export default function DashboardError({
       <button
         type="button"
         onClick={reset}
-        className="mt-4 rounded-lg border border-ink-600 px-4 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800"
+        className=" focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400mt-4 rounded-lg border border-ink-600 px-4 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800"
       >
         Try again
       </button>

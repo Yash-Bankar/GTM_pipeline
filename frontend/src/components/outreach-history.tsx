@@ -59,7 +59,7 @@ export function OutreachHistory({
           <button
             type="button"
             onClick={() => setCorrecting(null)}
-            className="mt-3 text-xs font-semibold text-mist-300 underline underline-offset-4 hover:text-mist-100"
+            className=" focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400mt-3 text-xs font-semibold text-mist-300 underline underline-offset-4 hover:text-mist-100"
           >
             Cancel correction
           </button>
@@ -113,7 +113,7 @@ export function OutreachHistory({
                     <button
                       type="button"
                       onClick={() => setCorrecting(event.event_id)}
-                      className="mt-1 text-[11px] font-semibold text-mist-300 underline underline-offset-4 hover:text-mist-100"
+                      className=" focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400mt-1 text-[11px] font-semibold text-mist-300 underline underline-offset-4 hover:text-mist-100"
                     >
                       Correct this entry
                     </button>

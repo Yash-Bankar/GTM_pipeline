@@ -78,7 +78,7 @@ export function ManualContactForm({ leadId }: { leadId: string }) {
         <button
           type="submit"
           disabled={pending}
-          className="min-h-11 shrink-0 rounded-lg border border-ink-600 px-3 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-40"
+          className=" focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400min-h-11 shrink-0 rounded-lg border border-ink-600 px-3 py-2 text-xs font-semibold text-mist-200 hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {pending ? "Adding…" : "Add contact"}
         </button>

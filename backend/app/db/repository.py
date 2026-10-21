@@ -535,6 +535,20 @@ class Repository:
         ).all()
         return [Contact.model_validate(row) for row in rows]
 
+    def contact_types_by_lead(self) -> dict[str, set[str]]:
+        """Return ``{lead_id: {contact type, ...}}`` for every lead with contacts.
+
+        Used by the creator list to show a contact indicator without loading
+        every contact row (V2-08).
+        """
+        rows = self.session.execute(
+            select(ContactORM.lead_id, ContactORM.type).distinct()
+        ).all()
+        result: dict[str, set[str]] = {}
+        for lead_id, contact_type in rows:
+            result.setdefault(lead_id, set()).add(contact_type)
+        return result
+
     def create_contact_request(self, request: ContactRequest) -> ContactRequest:
         now = utc_now_iso()
         data = request.model_dump()

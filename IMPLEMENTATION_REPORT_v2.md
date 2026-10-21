@@ -3,7 +3,7 @@
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_PRD_v2_Creator_Review.md` (v2.0, 20 October 2026)
 **Report date:** 2026-10-21
-**Status:** V2-01 through V2-07 **Complete**. V2-08 and V2-09 are tracked but not started.
+**Status:** V2-01 through V2-08 **Complete**. V2-09 is tracked but not started.
 
 ---
 
@@ -18,7 +18,7 @@
 | V2-05 · Extension reliability | Capture preview, scoped key, 50-item queue, connection/retry outcomes | **COMPLETE** |
 | V2-06 · Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | **COMPLETE** |
 | **V2-07 · Drafts and manual history** | Manual editor, optional generation, immutable versions, copy/export, sent/reply events | **COMPLETE** |
-| V2-08 · Review workspace UX | Creators views/detail, contextual actions, live progress, responsive forms | Not started |
+| **V2-08 · Review workspace UX** | Creators views/detail, contextual actions, live progress, responsive forms | **COMPLETE** |
 | V2-09 · Migration and release QA | Safe backfill, compatibility, test isolation, end-to-end sign-off | Not started |
 
 ---
@@ -1162,6 +1162,242 @@ lib/api.ts, lib/types.ts            new endpoints and types
 docs/api.md                         draft + event endpoints
 docs/database.md                    draft_revisions + outreach_events
 docs/worker.md                      generation as new versions
+```
+
+---
+
+## 9. V2-08 · Review workspace UX (Complete)
+
+### 9.1 Navigation: Creators, Outreach, Settings
+
+The navigation now uses exactly the three names the PRD specifies (PRD 6.1).
+
+| Item | Before | After |
+| --- | --- | --- |
+| Sidebar / top nav | Leads, Dossiers, Outreach, Settings | **Creators**, Outreach, Settings |
+| `/leads` | The list workspace | **Redirects to `/creators`** (no content deleted) |
+| `/dossiers` | The AI research list | **Redirects to `/creators`** (no content deleted) |
+| `/dossiers/{leadId}` | The dossier/brief page | **Redirects to `/creators/{leadId}`** |
+
+Creator briefs now live **inside** the creator detail view, so the legacy
+Dossiers route redirects to the appropriate creator view rather than 404ing.
+The dossier data itself is untouched: the creator detail page renders the
+evidence brief and, when present, the AI summary.
+
+### 9.2 Creators - the default workspace
+
+The list is now a **saved-view** workspace (PRD 6.2). The default view is
+**To review**.
+
+| View | Contents |
+| --- | --- |
+| **To review** (default) | `Not reviewed` **plus** shortlisters whose evidence changed (`Review needed`). **Excludes `Rejected`.** |
+| All creators | Every captured creator, including rejected and blocked ones |
+| Research more | Creators an operator asked for more research on |
+| Shortlisted | Creators on a shortlist, whatever their decision currency |
+| Rejected | Rejected creators, kept for deduplication and history |
+| Needs attention | Blocked system work that needs a remedy |
+
+- The view is part of the URL (`?view=…`), so the browser's back button works
+  and a view can be linked to.
+- Counters are **labelled per view**, not a single additive funnel: a creator
+  may appear in an operational view *and* a decision view, so the counts are
+  never summed.
+- An unknown view falls back to `to_review` instead of erroring.
+- The review queue is ordered **oldest unreviewed first**, so nothing is
+  starved. `Sort` also offers oldest/newest explicitly.
+- Search, research-state filter and sort are preserved when switching views.
+- The primary page action is **Add creator** (a single handle/URL form).
+- Each row has a clear **Review creator** action.
+
+### 9.3 Backend: saved views
+
+`backend/app/leads/views.py` owns the view semantics, so the filters, the row
+badges and the counters all use one server-defined rule (PRD 6.1 - "list
+badges, filters, summaries and detail must consume the same effective state
+contract").
+
+```text
+GET /api/v1/leads?view=to_review&sort=oldest&q=&status=&offset=&limit=
+```
+
+The response now carries the resolved view and the per-view counters:
+
+```json
+{
+  "items": [ ... ],
+  "total": 8,
+  "view": "to_review",
+  "view_counts": {
+    "to_review": 8, "all": 9, "research_more": 0,
+    "shortlisted": 1, "rejected": 0, "attention": 0
+  }
+}
+```
+
+Each row also carries `contact_types` (`["email"]`, `["phone"]`, …), the
+**contact indicator** the PRD asks for, so the list can show contact readiness
+without loading every contact row.
+
+### 9.4 Live progress (QA V29)
+
+`components/view-switcher.tsx` exports `LiveRefresh`, used on the Creators
+list and in the creator detail's activity panel. While a visible state is
+`queued`, `running` or `retry`, the view refreshes **every 5 seconds** - well
+inside the ten-second requirement.
+
+The refresh is deliberately non-disruptive:
+
+| Requirement | How it is met |
+| --- | --- |
+| Refresh within 10s | 5s polling interval, paused entirely when nothing is pending |
+| No focus movement | The focused element's id is captured before the refresh and restored afterwards - but **only** if the re-render actually dropped focus. Focus is never stolen back from where the user moved it. |
+| No cleared unsaved edits | The draft editor holds the subject/body/DM in **React state** (not the DOM), so a background re-render cannot wipe a half-written draft. Server values are only adopted when the user has no unsaved edits. |
+| Announce once | The "pending work finished" message is announced through a single `aria-live="polite"` region and fires **once**, not on every poll. |
+| Stable layout | The poll re-renders the server components in place; it does not remount the page or change the scroll position. |
+
+### 9.5 Responsive layout (QA V30)
+
+The layout is stable at the four widths the PRD names. The rules applied:
+
+| Width | Layout |
+| --- | --- |
+| **360px** | Single column. The creator list renders as a **stacked card list** (not a table), so the decision, research state and contact columns stay visible without horizontal scrolling. Page padding is `px-4` (16px), leaving 328px of content. |
+| **390px** | Same single-column layout; the card list has room for the two-column definition grid. |
+| **768px** | Still the card list - the eight-column table needs more room than 768px can give without horizontal scrolling, which would hide the decision and contact columns. The filter row wraps to full-width selects. |
+| **1280px** | The full table plus the sidebar. The detail view uses the two-column `1.6fr / 1fr` grid. |
+
+Supporting rules: `min-w-0` on the main column so flex children can shrink;
+no fixed pixel width above 320px anywhere in `src`; long identifiers use
+`break-all`; every control is at least 44px tall.
+
+### 9.6 Keyboard accessibility and visible labels
+
+Every interactive element was audited. The audit is reproducible:
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\audit_frontend_a11y.py
+```
+
+```text
+audited 50 interactive elements (29 buttons/links)
+issues: 0
+OK - every action has an accessible name, a visible focus ring, a >= 44px target, and no overflow at 360px.
+```
+
+What the audit checks, and what was changed to pass it:
+
+| Check | Result |
+| --- | --- |
+| Accessible name on every button, link and form control | 50/50 - text content, `aria-label`, `aria-labelledby`, or a `<label htmlFor>` association (including the template-literal `htmlFor={`…-${id}`}` form) |
+| Visible focus ring | 50/50 - a `focus-visible:outline` utility on buttons and links; form controls use the shared `.field` class, which shows a focus border plus halo in `globals.css` |
+| Touch target >= 44px | 29/29 buttons and links use `min-h-11` (44px) or larger |
+| No horizontal overflow at 360px | 0 fixed widths above 320px |
+
+Additional keyboard work:
+
+- The view switcher is a `role="group"` with `aria-label="Saved creator views"`
+  and each link carries `aria-current`.
+- The creator table has a `<caption class="sr-only">` and `scope="col"`
+  headers; the mobile card list is a real `<ul>`.
+- The activity/job history on the creator detail is a native `<details>` /
+  `<summary>`, so it is keyboard-operable without custom JavaScript.
+- The live-refresh region uses `role="status"` with `aria-live="polite"`, and
+  the animated dot is `aria-hidden` so it is not announced repeatedly.
+- Focus is always visible: every interactive element has a `focus-visible`
+  outline, and the `:focus` state of `.field` changes both the border colour
+  and the halo.
+
+### 9.7 Creator detail
+
+The detail view now carries the PRD's **contextual primary action**, with its
+prerequisite explained beside it rather than hidden behind a disabled button:
+
+| Situation | Action |
+| --- | --- |
+| No useful evidence | Add profile data |
+| Not reviewed with evidence | Review and decide |
+| Current shortlist with an email | Write draft |
+| Current shortlist without a usable contact | Find missing contact |
+| Shortlist needs review | Review changes and reconfirm |
+| Blocked research | Read the research remedy |
+
+The creator brief and the AI summary were moved into the detail view (the
+legacy Dossiers route now redirects here). The job history is a collapsed
+`<details>` activity section.
+
+### 9.8 API additions
+
+```text
+GET /api/v1/leads?view=&sort=     saved view, sorting, and per-view counters
+```
+
+No new endpoint was needed: the existing lead list grew two query parameters
+and two response fields, so existing callers keep working unchanged.
+
+### 9.9 Tests (V2-08)
+
+`tests/test_creator_views.py` - **9 new backend tests**:
+
+| Test | Covers |
+| --- | --- |
+| `test_default_view_is_to_review` | The default view is `to_review`; an unknown view falls back to it |
+| `test_every_view_has_a_label` | All six views exist and are labelled |
+| `test_to_review_includes_not_reviewed_and_review_needed` | Both halves of the default view |
+| `test_to_review_excludes_rejected` | Rejected creators are excluded |
+| `test_each_view_selects_the_right_rows` | All creators / Research more / Shortlisted / Rejected |
+| `test_view_counts_are_labelled_not_additive` | Counters are per view, not a funnel |
+| `test_matches_view_is_pure` | The matcher itself, including blocked work |
+| `test_review_order_is_oldest_unreviewed_first` | The review queue order |
+| `test_contact_indicator_is_reported_per_lead` | The contact indicator data |
+
+### 9.10 Verification
+
+| Check | Result |
+| --- | --- |
+| `python -m pytest` | **302 passed** (293 + 9 new) |
+| `npm run lint` | clean (0 problems) |
+| `npx tsc --noEmit` | clean (exit 0) |
+| `npm run build` | success - 13 routes, **no hydration or routing errors** |
+| `scripts/audit_frontend_a11y.py` | 50/50 elements pass; 0 issues |
+| Live API (all views) | every view returns 200 with matching counts; `view=bogus` resolves to `to_review` |
+| Live API (default) | `view=to_review`, `total=8`, counts `to_review=8 all=9 shortlisted=1` |
+
+### 9.11 Files changed
+
+**Backend**
+
+```text
+app/leads/views.py                  NEW - saved view semantics, counts, ordering
+app/leads/service.py                list(view/sort) + saved_view_counts
+app/leads/schemas.py                LeadResponse.contact_types, LeadListResponse.view
+app/leads/routes.py                 ?view= and ?sort= query parameters
+app/db/repository.py                contact_types_by_lead
+tests/test_creator_views.py         NEW (9 tests)
+```
+
+**Frontend**
+
+```text
+app/(dashboard)/creators/page.tsx         NEW - the review workspace
+app/(dashboard)/creators/[leadId]/page.tsx NEW - creator detail + contextual action
+app/(dashboard)/creators/loading.tsx       NEW
+app/(dashboard)/leads/page.tsx             redirect to /creators
+app/(dashboard)/dossiers/page.tsx          redirect to /creators
+app/(dashboard)/dossiers/[leadId]/page.tsx  redirect to /creators/{leadId}
+components/creators-table.tsx        NEW - table (lg+) and card list (<lg)
+components/creator-filters.tsx       NEW - search, research state, sort
+components/view-switcher.tsx         NEW - saved views + LiveRefresh
+lib/views.ts                        NEW - shared view constants
+lib/api.ts, lib/types.ts            view/sort params, contact_types, view_counts
+components/nav.tsx, top-nav.tsx      Creators / Outreach / Settings
+components/draft-editor.tsx          controlled inputs so a poll cannot clear edits
+```
+
+**Docs / scripts**
+
+```text
+scripts/audit_frontend_a11y.py      NEW - reproducible a11y + layout audit
 ```
 
 ---

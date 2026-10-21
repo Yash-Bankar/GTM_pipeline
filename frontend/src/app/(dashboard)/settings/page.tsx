@@ -99,15 +99,16 @@ export default async function SettingsPage() {
             tone: "green",
           },
           {
-            label: "Contact masking",
-            description: "Email/phone patterns are masked before AI intake.",
+            label: "Public contact visibility",
+            description:
+              "Public business contacts are shown to authenticated operators; credentials stay excluded.",
             value: "Active",
             tone: "green",
           },
           {
             label: "Reviewed draft preservation",
             description:
-              "NEEDS_REVIEW, APPROVED and REJECTED drafts are never overwritten by a rerun.",
+              "Every saved draft version is kept; edits and generation create a new version.",
             value: "Active",
             tone: "green",
           },
@@ -121,10 +122,13 @@ export default async function SettingsPage() {
             tone: status.hikerapi === "configured" ? "teal" : "neutral",
           },
           {
-            label: "AI drafts",
-            description: "Drafts are stored NEEDS_REVIEW; nothing is sent automatically.",
-            value: "Review only",
-            tone: "blue",
+            label: "AI drafting",
+            description:
+              status.gemini === "configured"
+                ? "Generation is optional; manual writing always works."
+                : "AI drafting is unavailable. You can write a draft manually.",
+            value: status.gemini === "configured" ? "Optional" : "Unavailable",
+            tone: status.gemini === "configured" ? "blue" : "amber",
           },
           {
             label: "Worker stale threshold",

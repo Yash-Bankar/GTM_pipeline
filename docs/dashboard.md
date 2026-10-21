@@ -42,17 +42,49 @@ SESSION_SECRET=                      # optional HMAC secret for the session cook
 
 | Route | What it shows |
 | --- | --- |
-| `/leads` | Searchable, filterable leads table; verified badge; follower precision; add-lead form; pipeline stats |
-| `/leads/[leadId]` | Profile snapshot (verified badge, bio, links, follower precision, missing fields), recent posts, website pages, job history, **fit decision**, **contact/draft gates**, and **draft revision history**; re-queue processing or **re-process AI jobs only** |
-| `/dossiers` | Dossier list with qualification score/tier; visible **Search creators** label |
-| `/dossiers/[leadId]` | Structured AI findings, criterion scores, cited sources, uncertainty |
+| `/creators` | The review workspace: saved views (default **To review**), search, research-state filter, sort, labelled counters, add-creator form, and the creator list (table at `lg+`, stacked cards below) |
+| `/creators/[leadId]` | Contextual primary action, creator brief + AI summary, profile snapshot, recent posts, website pages, public contacts, **fit decision**, **contact/draft gates**, and a collapsed activity/job history |
 | `/outreach` | Draft list with a visible **Draft status** filter |
-| `/outreach/[leadId]` | Editable email + DM draft with Approve / Reject (nothing is sent) |
+| `/outreach/[leadId]` | Draft versions (Save / Mark reviewed / Copy / Export text / Generate new version) and the manual sent/outcome history (nothing is sent) |
 | `/settings` | System health: worker heartbeat, database, Gemini/HikerAPI readiness, pipeline rules |
+| `/leads` | Legacy path — **redirects to `/creators`** |
+| `/dossiers` | Legacy path — **redirects to `/creators`** (briefs live in the creator detail view) |
+| `/dossiers/[leadId]` | Legacy path — **redirects to `/creators/{leadId}`** |
 
-Navigation is a sidebar at `lg+` and a visible compact top bar below `lg` (no
-hover-only menus); section links expose `aria-current`. Snapshot-only leads show
+Navigation uses exactly **Creators**, **Outreach** and **Settings**. It is a
+sidebar at `lg+` and a visible compact top bar below `lg` (no hover-only
+menus); section links expose `aria-current`. Snapshot-only leads show
 "Posts not captured in snapshot" instead of an ambiguous empty posts section.
+
+### Saved views (V2-08)
+
+The Creators page is a saved-view workspace. The default is **To review**:
+`Not reviewed` plus shortlisters whose evidence changed, **excluding
+`Rejected`**. The other views are All creators, Research more, Shortlisted,
+Rejected and Needs attention. The view lives in the URL (`?view=…`), and the
+counters are labelled per view rather than summed - a creator can appear in an
+operational view *and* a decision view.
+
+### Live progress (V2-08)
+
+While a visible state is `queued`, `running` or `retry`, the Creators list and
+the creator detail's activity panel refresh every 5 seconds. The refresh never
+moves focus and never clears an unsaved edit: the draft editor keeps the text
+in React state, and focus is restored only if the re-render actually dropped
+it. Completion is announced once through an `aria-live` region.
+
+### Responsive and accessible (V2-08)
+
+- Stable at **360, 390, 768 and 1280** CSS pixels. The creator list is a
+  stacked card list below `lg` so the decision and contact columns stay
+  visible without horizontal scrolling.
+- Every button, link and form control has an accessible name and a visible
+  focus ring; every control is at least 44px tall.
+- The audit is reproducible:
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\audit_frontend_a11y.py
+```
 
 ## States
 
@@ -65,10 +97,14 @@ hover-only menus); section links expose `aria-current`. Snapshot-only leads show
 
 ## Backend endpoints used
 
-`GET /api/v1/leads`, `POST /api/v1/leads`, `GET /api/v1/leads/{id}/detail`,
+`GET /api/v1/leads` (with `view` and `sort`), `POST /api/v1/leads`,
+`GET /api/v1/leads/{id}/detail`, `GET /api/v1/leads/{id}/brief`,
 `POST /api/v1/leads/{id}/retry`, `POST /api/v1/leads/{id}/retry-ai`,
-`GET /api/v1/dossiers[/{id}]`, `GET /api/v1/outreach[/{id}]`,
-`PATCH /api/v1/outreach/{id}`, `GET /api/v1/stats`.
+`GET|POST /api/v1/leads/{id}/drafts[/{rev}/review|/text]`,
+`POST /api/v1/leads/{id}/drafts/generate`,
+`GET|POST /api/v1/leads/{id}/outreach-events`,
+`GET /api/v1/outreach[/{id}]`, `PATCH /api/v1/outreach/{id}`,
+`GET /api/v1/stats`, `GET /api/v1/integrations/status`.
 All accept/return typed JSON; the client lives in `frontend/src/lib/api.ts`.
 
 ## Quality checks
@@ -78,6 +114,9 @@ cd frontend
 npm run lint
 npx tsc --noEmit
 npm run build
+
+cd ..
+.\backend\.venv\Scripts\python.exe scripts\audit_frontend_a11y.py
 ```
 
 ## Not implemented

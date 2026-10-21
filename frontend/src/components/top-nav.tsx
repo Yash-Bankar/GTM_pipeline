@@ -17,7 +17,7 @@ export function TopNav() {
   return (
     <div className="mb-4 lg:hidden">
       <div className="flex items-center justify-between gap-3">
-        <Link href="/leads" className="flex items-center gap-2">
+        <Link href="/creators" className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-500/15 text-sm font-bold text-accent-300">
             S
           </span>

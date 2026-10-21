@@ -35,8 +35,8 @@ export async function decideFit(input: {
 
   try {
     await api.decideFit(input.leadId, { action: input.action, note });
-    revalidatePath(`/leads/${input.leadId}`);
-    revalidatePath("/leads");
+    revalidatePath(`/creators/${input.leadId}`);
+    revalidatePath("/creators");
     return { ok: true, message: FIT_MESSAGES[input.action] };
   } catch (error) {
     return {
@@ -55,7 +55,7 @@ export async function requestContact(
   if (!leadId) return { ok: false, message: "Missing lead id." };
   try {
     const request = await api.requestContact(leadId, "", searchAgain);
-    revalidatePath(`/leads/${leadId}`);
+    revalidatePath(`/creators/${leadId}`);
     if (request.status === "found") {
       return { ok: true, message: "Public contact found. Review it below." };
     }
@@ -87,7 +87,7 @@ export async function addContact(
       value: input.value.trim(),
       source_url: input.sourceUrl.trim(),
     });
-    revalidatePath(`/leads/${leadId}`);
+    revalidatePath(`/creators/${leadId}`);
     return { ok: true, message: "Contact added with source." };
   } catch (error) {
     return {
@@ -105,7 +105,7 @@ export async function requestDraft(
   if (!leadId) return { ok: false, message: "Missing lead id." };
   try {
     await api.requestDraft(leadId, channel);
-    revalidatePath(`/leads/${leadId}`);
+    revalidatePath(`/creators/${leadId}`);
     return { ok: true, message: "Draft request created (a new revision was recorded)." };
   } catch (error) {
     return {

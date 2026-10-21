@@ -47,8 +47,9 @@ export function AddLeadForm() {
           disabled={pending}
           className="min-h-11 shrink-0 rounded-lg bg-accent-500 px-4 py-2 text-sm font-semibold text-ink-950 transition-colors hover:bg-accent-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {pending ? "Adding…" : "Add lead"}
+          {pending ? "Adding…" : "Add creator"}
         </button>
+
       </div>
 
       {showFeedback ? (
@@ -57,7 +58,7 @@ export function AddLeadForm() {
           {state.status === "created" && state.leadId ? (
             <>
               {" "}
-              <Link href={`/leads/${state.leadId}`} className="underline underline-offset-2">
+              <Link href={`/creators/${state.leadId}`} className="underline underline-offset-2">
                 View creator
               </Link>
             </>

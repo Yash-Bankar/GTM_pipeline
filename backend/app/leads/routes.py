@@ -23,6 +23,7 @@ from app.leads.schemas import (
     OutreachRevisionOut,
 )
 from app.leads.service import FitNotApprovedError, LeadService, RequestIdConflictError
+from app.leads.views import SAVED_VIEWS, VIEW_LABELS, normalize_view
 
 router = APIRouter(
     prefix="/api/v1",
@@ -71,7 +72,7 @@ def submit_lead(
 @router.get(
     "/leads",
     response_model=LeadListResponse,
-    summary="List leads with pagination and optional search/status filter",
+    summary="List leads with pagination, saved view, and optional search/status filter",
 )
 def list_leads(
     limit: int = Query(50, ge=1, le=500, description="Page size."),
@@ -80,19 +81,35 @@ def list_leads(
     status_filter: str | None = Query(
         None, alias="status", max_length=50, description="Filter by lead status."
     ),
+    view: str | None = Query(
+        None,
+        max_length=50,
+        description="Saved creator view (default 'to_review').",
+    ),
+    sort: str | None = Query(
+        None, max_length=20, description="Sort order (oldest/newest)."
+    ),
     service: LeadService = Depends(get_lead_service),
 ) -> LeadListResponse:
     rows, total = service.list(
-        limit=limit, offset=offset, search=q, status=status_filter
+        limit=limit, offset=offset, search=q, status=status_filter, view=view, sort=sort
     )
+    contact_types = service.contact_types_by_lead()
     return LeadListResponse(
         items=[
-            LeadResponse.from_lead(lead, progress=progress, remedy=remedy)
+            LeadResponse.from_lead(
+                lead,
+                progress=progress,
+                remedy=remedy,
+                contact_types=sorted(contact_types.get(lead.lead_id, set())),
+            )
             for lead, progress, remedy in rows
         ],
         total=total,
         limit=limit,
         offset=offset,
+        view=normalize_view(view),
+        view_counts=service.saved_view_counts(),
     )
 
 

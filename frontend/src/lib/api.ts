@@ -81,7 +81,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listLeads(params: { limit?: number; offset?: number; q?: string; status?: string } = {}) {
+  listLeads(
+    params: {
+      limit?: number;
+      offset?: number;
+      q?: string;
+      status?: string;
+      view?: string;
+      sort?: string;
+    } = {},
+  ) {
     return request<LeadList>(`/api/v1/leads${buildQuery(params)}`);
   },
 

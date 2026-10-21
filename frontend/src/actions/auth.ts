@@ -10,7 +10,7 @@ export interface LoginState {
 }
 
 export async function login(_prev: LoginState, formData: FormData): Promise<LoginState> {
-  if (!authEnabled()) redirect("/leads");
+  if (!authEnabled()) redirect("/creators");
 
   const password = String(formData.get("password") ?? "");
   if (!checkPassword(password)) {
@@ -24,7 +24,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     path: "/",
     maxAge: 60 * 60 * 12,
   });
-  redirect("/leads");
+  redirect("/creators");
 }
 
 export async function logout(): Promise<void> {

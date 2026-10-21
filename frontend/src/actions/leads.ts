@@ -25,7 +25,7 @@ export async function addLead(_prev: AddLeadState, formData: FormData): Promise<
 
   try {
     const result = await api.createLead({ username, source: "dashboard" });
-    revalidatePath("/leads");
+    revalidatePath("/creators");
     return {
       status: result.created ? "created" : "duplicate",
       leadId: result.lead.lead_id,
@@ -53,8 +53,8 @@ export async function retryLead(leadId: string): Promise<RetryState> {
   await requireSession();
   try {
     await api.retryLead(leadId);
-    revalidatePath(`/leads/${leadId}`);
-    revalidatePath("/leads");
+    revalidatePath(`/creators/${leadId}`);
+    revalidatePath("/creators");
     return { ok: true, message: "Re-queued for processing." };
   } catch (error) {
     return {
@@ -68,8 +68,8 @@ export async function retryAi(leadId: string): Promise<RetryState> {
   await requireSession();
   try {
     const result = await api.retryAi(leadId);
-    revalidatePath(`/leads/${leadId}`);
-    revalidatePath("/leads");
+    revalidatePath(`/creators/${leadId}`);
+    revalidatePath("/creators");
     const count = result.jobs?.length ?? 0;
     return { ok: true, message: `Re-queued ${count} AI job${count === 1 ? "" : "s"}.` };
   } catch (error) {

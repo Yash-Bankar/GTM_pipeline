@@ -48,7 +48,7 @@ export default async function OutreachDetailPage({ params }: { params: Params })
         description={`Outreach draft · ${current?.model || entry.model || "manual"}`}
         actions={
           <Link
-            href={`/leads/${entry.lead_id}`}
+            href={`/creators/${entry.lead_id}`}
             className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-semibold text-mist-200 hover:bg-ink-800"
           >
             View lead

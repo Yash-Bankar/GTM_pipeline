@@ -107,7 +107,7 @@ export function FitDecision({
             type="button"
             onClick={() => submit("reopen")}
             disabled={pending}
-            className={cn(BUTTON_BASE, "bg-sky-500 text-ink-950 hover:bg-sky-400")}
+            className={cn("focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400", BUTTON_BASE, "bg-sky-500 text-ink-950 hover:bg-sky-400")}
           >
             Reopen for review
           </button>
@@ -117,7 +117,7 @@ export function FitDecision({
               type="button"
               onClick={() => submit("shortlist")}
               disabled={pending}
-              className={cn(BUTTON_BASE, "bg-accent-500 text-ink-950 hover:bg-accent-400")}
+              className={cn("focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400", BUTTON_BASE, "bg-accent-500 text-ink-950 hover:bg-accent-400")}
             >
               Shortlist
             </button>
@@ -125,7 +125,7 @@ export function FitDecision({
               type="button"
               onClick={() => submit("research_more")}
               disabled={pending}
-              className={cn(
+              className={cn("focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400", 
                 BUTTON_BASE,
                 "border border-amber-glow/40 bg-amber-glow/10 text-amber-glow hover:bg-amber-glow/20",
               )}
@@ -136,7 +136,7 @@ export function FitDecision({
               type="button"
               onClick={() => submit("reject")}
               disabled={pending}
-              className={cn(
+              className={cn("focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400", 
                 BUTTON_BASE,
                 "border border-rose-alert/40 bg-rose-alert/10 text-rose-alert hover:bg-rose-alert/20",
               )}

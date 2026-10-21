@@ -37,6 +37,15 @@ from .schemas import (
     ProfileSnapshot,
 )
 from .validation import parse_lead_input
+from .views import (
+    DEFAULT_VIEW,
+    SAVED_VIEWS,
+    VIEW_LABELS,
+    matches_view,
+    normalize_view,
+    sort_rows,
+    view_counts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -540,13 +549,25 @@ class LeadService:
         offset: int,
         search: str | None = None,
         status: str | None = None,
+        view: str | None = None,
+        sort: str | None = None,
     ) -> tuple[list[tuple[Lead, str, str]], int]:
-        """Return a filtered, newest-first page of ``(lead, progress, remedy)``.
+        """Return a filtered, ordered page of ``(lead, progress, remedy)``.
 
         The ``status`` filter matches the **derived progress**, so filters, row
         badges and counters use the same server-defined logic (PRD T01).
+
+        ``view`` selects a saved creator view (V2-08). The default view is
+        "To review": not reviewed plus shortlisters that need a reconfirmation,
+        excluding rejected creators.
         """
         rows = self._repo.list_leads_with_progress()
+
+        # The saved view selects the rows the operator is looking at.
+        selected_view = normalize_view(view)
+        rows = [
+            row for row in rows if matches_view(row[0], row[1], selected_view)
+        ]
 
         if status:
             wanted = status.strip().lower()
@@ -556,9 +577,18 @@ class LeadService:
             needle = search.strip().casefold()
             rows = [row for row in rows if needle in _search_blob(row[0]).casefold()]
 
-        rows.sort(key=lambda row: (row[0].created_at, row[0].lead_id), reverse=True)
+        rows = sort_rows(rows, sort, selected_view)
         total = len(rows)
         return rows[offset : offset + limit], total
+
+    def saved_view_counts(self) -> dict[str, int]:
+        """Count creators per saved view (labelled counters, not a funnel)."""
+        rows = self._repo.list_leads_with_progress()
+        return view_counts(rows, self._repo.contact_types_by_lead())
+
+    def contact_types_by_lead(self) -> dict[str, set[str]]:
+        """Return ``{lead_id: {contact type}}`` for the contact indicator."""
+        return self._repo.contact_types_by_lead()
 
 
 def _search_blob(lead: Lead) -> str:

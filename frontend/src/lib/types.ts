@@ -52,6 +52,8 @@ export interface Lead {
   decision_currency: string;
   decision_currency_reason: string;
   new_evidence_available: boolean;
+  /** Contact types available (contact indicator). V2-08. */
+  contact_types: string[];
 }
 
 export interface LeadList {
@@ -59,6 +61,10 @@ export interface LeadList {
   total: number;
   limit: number;
   offset: number;
+  /** The saved view the page was rendered for. V2-08. */
+  view: string;
+  /** Per-view counters (labelled, not an additive funnel). V2-08. */
+  view_counts: Record<string, number>;
 }
 
 export interface LeadSubmission {
