@@ -11,6 +11,8 @@ STAGE_PROFILE_MEDIA = "profile_media"
 STAGE_WEBSITE_ENRICH = "website_enrich"
 STAGE_AI_DOSSIER = "ai_dossier"
 STAGE_AI_OUTREACH = "ai_outreach"
+# Explicit, contact-focused discovery pass (V2-06).
+STAGE_CONTACT_DISCOVERY = "contact_discovery"
 
 # Job statuses (`Pipeline Jobs` tab)
 JOB_QUEUED = "queued"
@@ -113,3 +115,34 @@ DRAFT_CHANNELS = ("email", "instagram_dm")
 # A worker heartbeat older than this is reported as stale (PRD T09).
 WORKER_STALE_SECONDS = 60
 WORKER_HEARTBEAT_ID = "worker"
+
+# Explicit contact discovery request states (V2-06).
+CONTACT_REQUEST_QUEUED = "queued"
+CONTACT_REQUEST_RUNNING = "running"
+CONTACT_REQUEST_FOUND = "found"
+CONTACT_REQUEST_NOT_FOUND = "not_found"
+CONTACT_REQUEST_FAILED = "failed"
+CONTACT_REQUEST_CANCELLED = "cancelled"
+CONTACT_REQUEST_STATUSES = (
+    CONTACT_REQUEST_QUEUED,
+    CONTACT_REQUEST_RUNNING,
+    CONTACT_REQUEST_FOUND,
+    CONTACT_REQUEST_NOT_FOUND,
+    CONTACT_REQUEST_FAILED,
+    CONTACT_REQUEST_CANCELLED,
+)
+CONTACT_REQUEST_ACTIVE = (CONTACT_REQUEST_QUEUED, CONTACT_REQUEST_RUNNING)
+# Terminal states which a repeated click reuses for the same evidence version.
+CONTACT_REQUEST_REUSABLE = (
+    CONTACT_REQUEST_QUEUED,
+    CONTACT_REQUEST_RUNNING,
+    CONTACT_REQUEST_FOUND,
+    CONTACT_REQUEST_NOT_FOUND,
+    CONTACT_REQUEST_FAILED,
+)
+
+# Contact extraction methods.
+CONTACT_METHOD_WEBSITE = "website_crawl"
+CONTACT_METHOD_DISCOVERY = "contact_discovery"
+CONTACT_METHOD_MANUAL = "manual"
+CONTACT_METHOD_LEGACY = "legacy"

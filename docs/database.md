@@ -95,9 +95,13 @@ timestamps. `page_id` is a deterministic hash of `(lead_id, url)`.
 `max_attempts`, `priority`, `payload`, `result`, `last_error`, `locked_at`,
 `locked_by`, `run_after`, timestamps.
 
-### `contact_requests` (PK `request_id`) — T08
-`lead_id` → `leads` (cascade), `status` (`requested`/...), `note`,
-`requested_at`, timestamps. Created only after `leads.fit_status = approved`.
+### `contact_requests` (PK `request_id`) — T08/V2-06
+`lead_id` → `leads` (cascade), `status` (`queued`/`running`/`found`/`not_found`/
+`failed`/`cancelled`), `note`, `evidence_version`, `searched_scope`,
+`result_count`, `error`, `requested_at`, `started_at`, `completed_at`,
+timestamps. One active request at a time; repeated clicks reuse the
+in-flight/completed request for the same evidence version. Created only for a
+current shortlist.
 
 ### `outreach_revisions` (PK `revision_id`) — T08
 `lead_id` → `leads` (cascade), `channel` (`email`/`instagram_dm`), `status`,

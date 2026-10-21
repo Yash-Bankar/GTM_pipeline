@@ -12,13 +12,14 @@ from app.config import get_settings
 from app.db.repository import Repository
 from app.db.schemas import (
     CaptureReceipt,
+    Contact,
     ContactRequest,
     EvidenceVersion,
     FitDecision,
     Lead,
     OutreachRevision,
 )
-from app.db.util import new_job_id, utc_now_iso, utc_now_iso_precise
+from app.db.util import contact_id, new_job_id, utc_now_iso, utc_now_iso_precise
 
 from .evidence import (
     changed_snapshot_fields,
@@ -381,20 +382,95 @@ class LeadService:
     def list_fit_decisions(self, lead_id: str) -> list[FitDecision]:
         return self._repo.list_fit_decisions(lead_id)
 
-    def request_contact(self, lead_id: str, *, note: str = "") -> ContactRequest | None:
-        """Queue an explicit contact request; requires an approved fit (T08)."""
+    def request_contact(
+        self, lead_id: str, *, note: str = "", search_again: bool = False
+    ) -> tuple[ContactRequest, bool] | None:
+        """Queue an explicit contact-discovery request (V2-06).
+
+        Requires a current shortlist. Repeated clicks for the same evidence
+        version return the existing in-flight/completed request; ``search_again``
+        creates a new attempt. Returns ``(request, created)``.
+        """
         lead = self._repo.get_lead(lead_id)
         if lead is None:
             return None
         self._require_approved(lead)
+
+        evidence_version = lead.evidence_version
+        if not search_again:
+            existing = self._repo.find_contact_request_for_evidence(
+                lead_id, evidence_version
+            )
+            if (
+                existing is not None
+                and existing.status in constants.CONTACT_REQUEST_REUSABLE
+            ):
+                return (existing, False)
+
         now = utc_now_iso()
-        return self._repo.create_contact_request(
+        request = self._repo.create_contact_request(
             ContactRequest(
                 request_id=new_job_id("cr"),
                 lead_id=lead_id,
-                status="requested",
+                status=constants.CONTACT_REQUEST_QUEUED,
                 note=note.strip(),
+                evidence_version=evidence_version,
                 requested_at=now,
+            )
+        )
+
+        # Supersede any queued/running request for an older evidence version.
+        for prior in self._repo.list_contact_requests(lead_id):
+            if prior.request_id == request.request_id:
+                continue
+            if prior.status in constants.CONTACT_REQUEST_ACTIVE:
+                self._repo.update_contact_request(
+                    prior.request_id,
+                    {
+                        "status": constants.CONTACT_REQUEST_CANCELLED,
+                        "error": "Superseded by a newer request",
+                        "completed_at": now,
+                    },
+                )
+
+        payload = json.dumps({"request_id": request.request_id})
+        _, job = self._repo.enqueue(
+            constants.STAGE_CONTACT_DISCOVERY,
+            lead_id,
+            lead.username,
+            lead.username_normalized,
+            payload=payload,
+            max_attempts=3,
+            on_duplicate="reenqueue",
+        )
+        # A queued job may still point at an older request; retarget it.
+        self._repo.point_job_to_payload(job.job_id, payload)
+        return (request, True)
+
+    def list_contact_requests(self, lead_id: str) -> list[ContactRequest]:
+        return self._repo.list_contact_requests(lead_id)
+
+    def add_contact(
+        self, lead_id: str, *, contact_type: str, value: str, source_url: str
+    ) -> Contact | None:
+        """Manually add a sourced public contact (no fit gate; V2-06 fallback)."""
+        lead = self._repo.get_lead(lead_id)
+        if lead is None:
+            return None
+        text = value.strip()
+        source = source_url.strip()
+        if not text or not source:
+            return None
+        return self._repo.upsert_contact(
+            Contact(
+                contact_id=contact_id(lead_id, contact_type, text, source),
+                lead_id=lead_id,
+                type=contact_type,
+                value=text,
+                source_url=source,
+                observed_at=utc_now_iso(),
+                method=constants.CONTACT_METHOD_MANUAL,
+                validation_state="unverified",
             )
         )
 

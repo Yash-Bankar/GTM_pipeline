@@ -97,6 +97,17 @@ def _job_force(job: PipelineJob) -> bool:
     return bool(isinstance(payload, dict) and payload.get("force"))
 
 
+def _job_request_id(job: PipelineJob) -> str:
+    """Read the explicit contact-request id from a discovery job payload."""
+    try:
+        payload = json.loads(job.payload or "{}")
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("request_id") or "").strip()
+
+
 def _is_existing_draft(entry: OutreachEntry | None) -> bool:
     """True when an outreach row already holds reviewed or authored content.
 
@@ -723,3 +734,193 @@ class AIDisabledStage:
     def run(self, job: PipelineJob, repo: Repository) -> StageOutcome:
         logger.info("AI stage %s skipped for lead %s: AI disabled", job.stage, job.lead_id)
         return StageOutcome(ok=True, result="AI disabled; no provider call")
+
+
+class ContactDiscoveryStage:
+    """Explicit, contact-focused pass over public sources (V2-06).
+
+    Idempotent: a repeated click for the same evidence version reuses the request.
+    If the shortlist is revoked (rejected / review needed) before or during the
+    pass, the request is cancelled and no contacts are published.
+    """
+
+    name = constants.STAGE_CONTACT_DISCOVERY
+
+    def __init__(self, crawler: PageCrawler) -> None:
+        self._crawler = crawler
+
+    def run(self, job: PipelineJob, repo: Repository) -> StageOutcome:
+        request_id = _job_request_id(job)
+        request = repo.get_contact_request(request_id)
+        if request is None:
+            return StageOutcome(ok=True, result="contact request not found; skipped")
+
+        terminal = (
+            constants.CONTACT_REQUEST_FOUND,
+            constants.CONTACT_REQUEST_NOT_FOUND,
+            constants.CONTACT_REQUEST_FAILED,
+            constants.CONTACT_REQUEST_CANCELLED,
+        )
+        if request.status in terminal:
+            return StageOutcome(ok=True, result=f"request already {request.status}")
+
+        lead = repo.get_lead(request.lead_id)
+        if lead is None:
+            repo.update_contact_request(
+                request_id,
+                {
+                    "status": constants.CONTACT_REQUEST_FAILED,
+                    "error": "lead not found",
+                    "completed_at": utc_now_iso(),
+                },
+            )
+            return StageOutcome(ok=True, result="lead not found")
+
+        if not _contact_gate(lead):
+            return _cancel_request(repo, request_id, "Fit approval revoked")
+
+        now = utc_now_iso()
+        repo.update_contact_request(
+            request_id,
+            {"status": constants.CONTACT_REQUEST_RUNNING, "started_at": now, "error": ""},
+        )
+
+        urls = _discovery_urls(repo, lead)
+        if not urls:
+            repo.update_contact_request(
+                request_id,
+                {
+                    "status": constants.CONTACT_REQUEST_FAILED,
+                    "error": "No public sources to search",
+                    "searched_scope": "0 sources",
+                    "completed_at": utc_now_iso(),
+                },
+            )
+            return StageOutcome(ok=True, result="no public sources")
+
+        try:
+            pages, _emails = self._crawler.crawl(urls)
+        except Exception as exc:  # noqa: BLE001 - recorded as a request failure
+            repo.update_contact_request(
+                request_id,
+                {
+                    "status": constants.CONTACT_REQUEST_FAILED,
+                    "error": _error_text(exc),
+                    "searched_scope": f"{len(urls)} source(s)",
+                    "completed_at": utc_now_iso(),
+                },
+            )
+            return StageOutcome(ok=True, result="contact discovery failed")
+
+        # Re-check after the external work: never publish after a revocation.
+        lead = repo.get_lead(request.lead_id)
+        if lead is None or not _contact_gate(lead):
+            return _cancel_request(repo, request_id, "Fit approval revoked during search")
+
+        done = blocked = errored = 0
+        contact_ids: set[str] = set()
+        for page in pages:
+            if page.status == "done":
+                done += 1
+            elif page.status == "blocked":
+                blocked += 1
+            else:
+                errored += 1
+            source = page.resolved_url or page.url
+            for email in page.emails or []:
+                contact_ids.add(_store_discovery_contact(repo, request.lead_id, "email", email, source, now))
+            for phone in page.phones or []:
+                contact_ids.add(_store_discovery_contact(repo, request.lead_id, "phone", phone, source, now))
+        contact_ids.discard("")
+
+        scope = f"{len(urls)} source(s), {len(pages)} page(s) searched"
+        if contact_ids:
+            status = constants.CONTACT_REQUEST_FOUND
+            error = ""
+        elif pages and done == 0:
+            status = constants.CONTACT_REQUEST_FAILED
+            error = "All sources were blocked or unreachable"
+        else:
+            status = constants.CONTACT_REQUEST_NOT_FOUND
+            error = ""
+
+        repo.update_contact_request(
+            request_id,
+            {
+                "status": status,
+                "result_count": len(contact_ids),
+                "searched_scope": scope,
+                "completed_at": utc_now_iso(),
+                "error": error,
+            },
+        )
+        return StageOutcome(
+            ok=True,
+            result=json.dumps(
+                {
+                    "status": status,
+                    "contacts": len(contact_ids),
+                    "pages": len(pages),
+                    "done": done,
+                    "blocked": blocked,
+                    "error": errored,
+                }
+            ),
+        )
+
+
+def _contact_gate(lead: Lead) -> bool:
+    return (
+        lead.fit_status == constants.FIT_STATUS_SHORTLISTED
+        and (lead.decision_currency or constants.DECISION_CURRENCY_CURRENT)
+        == constants.DECISION_CURRENCY_CURRENT
+    )
+
+
+def _cancel_request(repo: Repository, request_id: str, reason: str) -> StageOutcome:
+    repo.update_contact_request(
+        request_id,
+        {
+            "status": constants.CONTACT_REQUEST_CANCELLED,
+            "error": reason,
+            "completed_at": utc_now_iso(),
+        },
+    )
+    return StageOutcome(ok=True, result=f"cancelled: {reason}")
+
+
+def _discovery_urls(repo: Repository, lead: Lead) -> list[str]:
+    """Public sources to search: supplied links plus already-observed pages."""
+    urls = _external_urls(lead)
+    for page in repo.list_website_pages(lead.lead_id):
+        candidate = page.resolved_url or page.url
+        if candidate and candidate not in urls:
+            urls.append(candidate)
+    return urls
+
+
+def _store_discovery_contact(
+    repo: Repository,
+    lead_id: str,
+    kind: str,
+    value: str,
+    source_url: str,
+    observed_at: str,
+) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    cid = contact_id(lead_id, kind, text, source_url)
+    repo.upsert_contact(
+        Contact(
+            contact_id=cid,
+            lead_id=lead_id,
+            type=kind,
+            value=text,
+            source_url=source_url,
+            observed_at=observed_at,
+            method=constants.CONTACT_METHOD_DISCOVERY,
+            validation_state="unverified",
+        )
+    )
+    return cid

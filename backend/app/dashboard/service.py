@@ -14,6 +14,7 @@ from app.db.repository import Repository
 from app.leads.schemas import parse_snapshot_out
 from app.db.schemas import (
     Contact,
+    ContactRequest,
     Dossier,
     Lead,
     LeadPost,
@@ -37,6 +38,7 @@ class LeadDetail:
     posts: list[LeadPost] = field(default_factory=list)
     website_pages: list[WebsitePage] = field(default_factory=list)
     contacts: list[Contact] = field(default_factory=list)
+    contact_request: ContactRequest | None = None
     jobs: list[PipelineJob] = field(default_factory=list)
 
 
@@ -58,6 +60,7 @@ class DashboardService:
             posts=self._repo.list_posts(lead_id),
             website_pages=self._repo.list_website_pages(lead_id),
             contacts=self._repo.list_contacts(lead_id),
+            contact_request=self._repo.latest_contact_request(lead_id),
             jobs=self._repo.list_jobs(lead_id),
         )
 

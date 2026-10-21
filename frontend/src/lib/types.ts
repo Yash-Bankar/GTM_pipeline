@@ -115,6 +115,7 @@ export interface LeadDetail {
   posts: Post[];
   website_pages: WebsitePage[];
   contacts: Contact[];
+  contact_request: ContactRequest | null;
   jobs: Job[];
 }
 
@@ -263,4 +264,19 @@ export interface FitDecision {
 export interface FitDecisionList {
   items: FitDecision[];
   total: number;
+}
+
+export interface ContactRequest {
+  request_id: string;
+  lead_id: string;
+  status: string;
+  note: string;
+  evidence_version: number;
+  searched_scope: string;
+  result_count: number;
+  error: string;
+  requested_at: string;
+  started_at: string;
+  completed_at: string;
+  created_at: string;
 }

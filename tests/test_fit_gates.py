@@ -86,7 +86,7 @@ def test_contact_request_blocked_until_approved(api_client) -> None:
     assert allowed.status_code == 201
     body = allowed.json()
     assert body["lead_id"] == lead_id
-    assert body["status"] == "requested"
+    assert body["status"] == "queued"
     assert body["note"] == "Find public email"
 
 

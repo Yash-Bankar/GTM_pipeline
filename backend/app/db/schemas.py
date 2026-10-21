@@ -203,9 +203,15 @@ class ContactRequest(RowModel):
 
     request_id: str = ""
     lead_id: str = ""
-    status: str = "requested"
+    status: str = "queued"
     note: str = ""
+    evidence_version: IntField = 0
+    searched_scope: str = ""
+    result_count: IntField = 0
+    error: str = ""
     requested_at: str = ""
+    started_at: str = ""
+    completed_at: str = ""
     created_at: str = ""
     updated_at: str = ""
 

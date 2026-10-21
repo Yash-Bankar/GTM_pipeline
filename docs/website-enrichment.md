@@ -53,6 +53,28 @@ Each `FetchedPage` becomes a `Website Pages` row:
 | `error` | reason when not `done` |
 | `fetchedAt` | fetch timestamp |
 
+## Contact extraction (emails + phones)
+
+Contacts are read from the **visible page text** plus explicit `mailto:`/`tel:`
+links only. Raw HTML is never scanned for contacts: page source is full of CSS
+dimensions and script constants that look like numbers.
+
+`backend/app/providers/emails.py` validates every candidate strictly, because a
+fabricated contact is worse than a missed one (PRD 4.4 — never guess):
+
+- **Phones** must match a strict shape (optional country code, then groups
+  separated by single spaces/dashes/dots, optionally parenthesised), carry
+  10–15 digits (8+ with a leading `+`), and use plausible group sizes
+  (country code 1–3, area/subscriber groups 2–4, at most 6 groups). Dates
+  (`2026-10-19`), decimals (`3.99 4.27`), tracking codes
+  (`35771933781168458101792575716`) and CSS values (`1000 1000`) are rejected.
+- **Emails** are rejected when they are image/asset filenames (`logo@2x.png`,
+  `hero@3x.jpg`), transactional senders (`noreply@`, `no-reply@`,
+  `donotreply@`, `mailer-daemon@`, `postmaster@`), or known placeholder
+  domains.
+
+One-off cleanup of historic garbage rows: `scripts/clean_garbage_phones.py`.
+
 ## Lead status
 
 The stage sets the lead's `websiteStatus` and, when present, the enriched row's
@@ -87,4 +109,5 @@ WEBSITE_USER_AGENT=SynpoGTM/0.1
 Coverage: disallowed schemes, internal/private hosts, successful extraction
 (title/text/links/emails), response-size limit, non-HTML, transport errors,
 blocked redirects, link-following boundaries, missing website, all-blocked,
-partial failures, and idempotent page storage.
+partial failures, idempotent page storage, and rejection of CSS/tracking-code
+noise as phone numbers (`tests/test_contact_extraction.py`).

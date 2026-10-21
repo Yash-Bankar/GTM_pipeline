@@ -127,6 +127,39 @@ def test_crawl_transport_error_is_error_page() -> None:
     assert pages[0].status == "error"
 
 
+def test_crawl_ignores_css_numbers_and_tracking_codes() -> None:
+    """V2-06 hotfix: page source noise must never become a phone number."""
+    html = """
+    <html><head>
+      <style>.a{margin:0 2.17-.01 2.444-.046 3.292;transform:translate3d(0,0,0)}
+             .b{content:"35771933781168458101792575716"}</style>
+      <script>var t="4 4 0 0 0 3.99 4.27";</script>
+    </head><body>
+      <p>Call us on +1 (415) 555-0199</p>
+    </body></html>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=html)
+
+    pages, _ = build(handler, max_pages=1).crawl(["https://example.org/"])
+    page = pages[0]
+    assert page.status == "done"
+    assert page.phones == ["+1 (415) 555-0199"]
+
+
+def test_crawl_uses_tel_links() -> None:
+    html = """
+    <html><body><a href="tel:+14155550199">Call us</a></body></html>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=html)
+
+    pages, _ = build(handler, max_pages=1).crawl(["https://example.org/"])
+    assert pages[0].phones == ["+14155550199"]
+
+
 def test_crawl_follows_useful_same_host_links_only() -> None:
     requested: list[str] = []
 

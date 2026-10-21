@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from app.dashboard.schemas import ContactOut
 from app.dependencies import get_lead_service, require_api_key
 from app.leads.schemas import (
     ContactRequestCreate,
+    ContactRequestListOut,
     ContactRequestOut,
     DraftRequestCreate,
     FitDecisionListOut,
@@ -16,6 +18,7 @@ from app.leads.schemas import (
     LeadListResponse,
     LeadResponse,
     LeadSubmissionResponse,
+    ManualContactCreate,
     OutreachRevisionListOut,
     OutreachRevisionOut,
 )
@@ -151,11 +154,16 @@ def decide_fit(
 )
 def request_contact(
     lead_id: str,
+    response: Response,
     payload: ContactRequestCreate | None = None,
     service: LeadService = Depends(get_lead_service),
 ) -> ContactRequestOut:
     try:
-        request = service.request_contact(lead_id, note=payload.note if payload else "")
+        result = service.request_contact(
+            lead_id,
+            note=payload.note if payload else "",
+            search_again=payload.search_again if payload else False,
+        )
     except FitNotApprovedError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -169,11 +177,14 @@ def request_contact(
                 "decision_currency": exc.decision_currency,
             },
         ) from exc
-    if request is None:
+    if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No lead with leadId '{lead_id}'.",
         )
+    request, created = result
+    if not created:
+        response.status_code = status.HTTP_200_OK
     return ContactRequestOut.from_model(request)
 
 
@@ -251,3 +262,49 @@ def list_fit_decisions(
         items=[FitDecisionOut.from_model(row) for row in rows],
         total=len(rows),
     )
+
+
+@router.get(
+    "/leads/{lead_id}/contact-requests",
+    response_model=ContactRequestListOut,
+    summary="List explicit contact-discovery requests (V2-06)",
+)
+def list_contact_requests(
+    lead_id: str,
+    service: LeadService = Depends(get_lead_service),
+) -> ContactRequestListOut:
+    if service.get(lead_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    rows = service.list_contact_requests(lead_id)
+    return ContactRequestListOut(
+        items=[ContactRequestOut.from_model(row) for row in rows],
+        total=len(rows),
+    )
+
+
+@router.post(
+    "/leads/{lead_id}/contacts",
+    response_model=ContactOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a sourced public contact manually (V2-06 fallback)",
+)
+def add_contact(
+    lead_id: str,
+    payload: ManualContactCreate,
+    service: LeadService = Depends(get_lead_service),
+) -> ContactOut:
+    contact = service.add_contact(
+        lead_id,
+        contact_type=payload.type,
+        value=payload.value,
+        source_url=payload.source_url,
+    )
+    if contact is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    return ContactOut.from_model(contact)

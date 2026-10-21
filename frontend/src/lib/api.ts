@@ -9,6 +9,8 @@
 import { ApiError } from "./errors";
 import type {
   Brief,
+  Contact,
+  ContactRequest,
   Dossier,
   DossierList,
   FitDecisionList,
@@ -102,10 +104,23 @@ export const api = {
     });
   },
 
-  requestContact(leadId: string, note = "") {
-    return request<unknown>(`/api/v1/leads/${encodeURIComponent(leadId)}/contact-requests`, {
+  requestContact(leadId: string, note = "", searchAgain = false) {
+    return request<ContactRequest>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/contact-requests`,
+      {
+        method: "POST",
+        body: JSON.stringify({ note, search_again: searchAgain }),
+      },
+    );
+  },
+
+  addContact(
+    leadId: string,
+    body: { type: "email" | "phone"; value: string; source_url: string },
+  ) {
+    return request<Contact>(`/api/v1/leads/${encodeURIComponent(leadId)}/contacts`, {
       method: "POST",
-      body: JSON.stringify({ note }),
+      body: JSON.stringify(body),
     });
   },
 

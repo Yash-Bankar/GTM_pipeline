@@ -210,9 +210,15 @@ class ContactRequest(Base):
     lead_id: Mapped[str] = mapped_column(
         ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
     )
-    status: Mapped[str] = mapped_column(String(32), default="requested", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     note: Mapped[str] = mapped_column(Text, default="")
+    evidence_version: Mapped[int] = mapped_column(Integer, default=0)
+    searched_scope: Mapped[str] = mapped_column(Text, default="")
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
     requested_at: Mapped[str] = mapped_column(String(40), default="")
+    started_at: Mapped[str] = mapped_column(String(40), default="")
+    completed_at: Mapped[str] = mapped_column(String(40), default="")
     created_at: Mapped[str] = mapped_column(String(40), default="")
     updated_at: Mapped[str] = mapped_column(String(40), default="")
 

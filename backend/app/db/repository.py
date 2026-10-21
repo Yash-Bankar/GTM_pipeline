@@ -83,6 +83,15 @@ _LEAD_INT_FIELDS = {"follower_count", "follows_count"}
 _LEAD_BOOL_FIELDS = {"new_evidence_available"}
 _LEAD_FIELDS = {column.name for column in LeadORM.__table__.columns}
 _OUTREACH_FIELDS = {"status", "subject", "body", "dm_body", "channel", "model", "generated_at"}
+_CONTACT_REQUEST_FIELDS = {
+    "status",
+    "note",
+    "searched_scope",
+    "result_count",
+    "error",
+    "started_at",
+    "completed_at",
+}
 
 
 def _iso_after(seconds: float) -> str:
@@ -526,9 +535,71 @@ class Repository:
         rows = self.session.scalars(
             select(ContactRequestORM)
             .where(ContactRequestORM.lead_id == lead_id)
-            .order_by(ContactRequestORM.created_at)
+            .order_by(ContactRequestORM.created_at, ContactRequestORM.request_id)
         ).all()
         return [ContactRequest.model_validate(row) for row in rows]
+
+    def get_contact_request(self, request_id: str) -> ContactRequest | None:
+        if not request_id:
+            return None
+        row = self.session.get(ContactRequestORM, request_id)
+        return ContactRequest.model_validate(row) if row is not None else None
+
+    def update_contact_request(
+        self, request_id: str, fields: dict[str, object]
+    ) -> ContactRequest | None:
+        row = self.session.get(ContactRequestORM, request_id)
+        if row is None:
+            return None
+        for key, value in fields.items():
+            if key in _CONTACT_REQUEST_FIELDS:
+                setattr(row, key, value)
+        row.updated_at = utc_now_iso()
+        self.session.commit()
+        return ContactRequest.model_validate(row)
+
+    def latest_contact_request(self, lead_id: str) -> ContactRequest | None:
+        row = self.session.scalar(
+            select(ContactRequestORM)
+            .where(ContactRequestORM.lead_id == lead_id)
+            .order_by(
+                ContactRequestORM.created_at.desc(), ContactRequestORM.request_id.desc()
+            )
+            .limit(1)
+        )
+        return ContactRequest.model_validate(row) if row is not None else None
+
+    def find_contact_request_for_evidence(
+        self, lead_id: str, evidence_version: int
+    ) -> ContactRequest | None:
+        row = self.session.scalar(
+            select(ContactRequestORM)
+            .where(
+                ContactRequestORM.lead_id == lead_id,
+                ContactRequestORM.evidence_version == int(evidence_version),
+            )
+            .order_by(
+                ContactRequestORM.created_at.desc(), ContactRequestORM.request_id.desc()
+            )
+            .limit(1)
+        )
+        return ContactRequest.model_validate(row) if row is not None else None
+
+    def point_job_to_payload(self, job_id: str, payload: str) -> bool:
+        """Point a queued/retry job at a newer request payload."""
+        row = self.session.get(JobORM, job_id)
+        if row is None or row.status not in (
+            constants.JOB_QUEUED,
+            constants.JOB_RETRY,
+        ):
+            return False
+        row.status = constants.JOB_QUEUED
+        row.payload = payload
+        row.run_after = ""
+        row.last_error = ""
+        row.updated_at = utc_now_iso()
+        self.session.commit()
+        return True
 
     def create_outreach_revision(self, revision: OutreachRevision) -> OutreachRevision:
         now = utc_now_iso()

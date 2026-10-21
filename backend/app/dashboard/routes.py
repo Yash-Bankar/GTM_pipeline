@@ -25,7 +25,7 @@ from app.dashboard.schemas import (
 )
 from app.dashboard.service import DashboardService
 from app.dependencies import get_dashboard_service, require_api_key
-from app.leads.schemas import LeadResponse
+from app.leads.schemas import ContactRequestOut, LeadResponse
 
 router = APIRouter(
     prefix="/api/v1",
@@ -54,6 +54,11 @@ def lead_detail(
         posts=[PostOut.from_model(post) for post in detail.posts],
         website_pages=[WebsitePageOut.from_model(page) for page in detail.website_pages],
         contacts=[ContactOut.from_model(contact) for contact in detail.contacts],
+        contact_request=(
+            ContactRequestOut.from_model(detail.contact_request)
+            if detail.contact_request is not None
+            else None
+        ),
         jobs=[JobOut.from_model(job) for job in detail.jobs],
     )
 

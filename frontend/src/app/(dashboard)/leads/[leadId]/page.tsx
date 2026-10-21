@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { FitDecision } from "@/components/fit-decision";
+import { ManualContactForm } from "@/components/manual-contact-form";
 import { OutreachGates } from "@/components/outreach-gates";
 import { RetryAiButton } from "@/components/retry-ai-button";
 import { RetryButton } from "@/components/retry-button";
@@ -72,7 +73,16 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
     decisions = [];
   }
 
-  const { lead, progress, progress_remedy: remedy, posts, website_pages: pages, contacts, jobs } = detail;
+  const {
+    lead,
+    progress,
+    progress_remedy: remedy,
+    posts,
+    website_pages: pages,
+    contacts,
+    contact_request: contactRequest,
+    jobs,
+  } = detail;
   const snapshot = lead.snapshot;
   const links = splitUrls(lead.all_external_urls);
   const postsEmpty = postsEmptyCopy(lead.media_status);
@@ -283,6 +293,7 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
                 ))}
               </ul>
             )}
+            <ManualContactForm leadId={lead.lead_id} />
           </Card>
 
           {revisions.length > 0 ? (
@@ -336,6 +347,7 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
               leadId={lead.lead_id}
               enabled={outreachEnabled}
               reason={gateReason}
+              contactRequest={contactRequest}
             />
           </Card>
 

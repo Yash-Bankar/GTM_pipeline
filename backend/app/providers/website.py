@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 
 from app.common.retry import call_with_retry
 
-from .emails import extract_emails, extract_phones
+from .emails import extract_emails, extract_phones, is_plausible_phone
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +233,21 @@ def _clean_text(soup: BeautifulSoup, max_chars: int) -> str:
     return re.sub(r"\s+", " ", text)[:max_chars]
 
 
+def _extract_tel_links(soup: BeautifulSoup) -> list[str]:
+    """Return the phone numbers published in ``tel:`` links.
+
+    ``tel:`` hrefs are an explicit, machine-readable statement of the contact
+    number, so they are trusted far more than numbers found in page text.
+    """
+    found: list[str] = []
+    for anchor in soup.select('a[href^="tel:"]'):
+        raw = anchor.get("href", "")
+        number = raw[4:].split("?")[0].strip()
+        if number:
+            found.append(number)
+    return found
+
+
 def _extract_visible_links(soup: BeautifulSoup, base_url: str, max_links: int) -> list[dict]:
     links: list[dict] = []
     seen: set[str] = set()
@@ -424,6 +439,17 @@ class WebsiteCrawler:
             )
             text = _clean_text(soup, self._text_max_chars)
             links = _extract_visible_links(soup, current, self._max_links_per_page)
+            # Contacts are read from the *visible* text and from explicit
+            # mailto:/tel: links. Raw HTML is not scanned: it is full of CSS
+            # dimensions and script constants that look like numbers.
+            contact_source = text + " " + " ".join(
+                f"{anchor.get('href', '')} {anchor.get_text(' ', strip=True)}"
+                for anchor in soup.select('a[href^="mailto:"], a[href^="tel:"]')
+            )
+            phones = extract_phones(contact_source)
+            for number in _extract_tel_links(soup):
+                if number not in phones and is_plausible_phone(number):
+                    phones.append(number)
             return FetchedPage(
                 url=url,
                 resolved_url=current,
@@ -431,8 +457,8 @@ class WebsiteCrawler:
                 title=title,
                 text=text,
                 links=links,
-                emails=extract_emails(html + " " + text),
-                phones=extract_phones(html + " " + text),
+                emails=extract_emails(contact_source),
+                phones=sorted(set(phones)),
                 http_status=status,
                 status="done",
             )

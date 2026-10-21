@@ -21,6 +21,7 @@ backend/app/worker/
 | `profile_fetch` | Snapshot → lead fields (else HikerAPI when configured); enqueues follow-ups | `leads` | `lead_id` |
 | `profile_media` | bounded recent posts/reels | `lead_posts`, lead `media_status` | `post_id` |
 | `website_enrich` | SSRF-safe crawl of external links; extracts public emails/phones | `website_pages`, `contacts`, lead `website_status` | `page_id` |
+| `contact_discovery` | Explicit contact-focused pass over public sources (V2-06) | `contacts`, `contact_requests` | `request_id` |
 | `ai_dossier` | Gemini creator brief/dossier + qualification score | `dossiers` | `lead_id` |
 | `ai_outreach` | Gemini email/DM drafts (`NEEDS_REVIEW`), only when explicitly queued | `outreach_drafts` | `lead_id` |
 
@@ -48,6 +49,22 @@ with `type`, `value`, `source_url`, `observed_at`, and `method="website_crawl"`
 require a shortlist/fit gate. Recrawls upsert by a deterministic contact id.
 Legacy `business_email`/`business_phone_number` rows are backfilled with
 `method="legacy"` and labeled "Legacy source unknown".
+
+## Explicit contact discovery (V2-06)
+
+`contact_discovery` processes a request queued by
+`POST /api/v1/leads/{id}/contact-requests` (requires a current shortlist).
+
+- It crawls the supplied external links plus already-observed website pages.
+- Status lifecycle: `queued` -> `running` -> `found` | `not_found` | `failed` |
+  `cancelled`, with `searched_scope`, `result_count`, `error`, and timestamps.
+- Repeated requests for the same evidence version reuse the existing request;
+  `search_again` creates a new attempt.
+- The shortlist is re-checked after the crawl, before publishing. A revoked
+  shortlist (rejected/review needed) cancels the request and publishes nothing.
+- Found contacts are stored with `method="contact_discovery"` and a source URL.
+  Manual sourced contacts (`POST /leads/{id}/contacts`) use `method="manual"` and
+  are available without a fit gate.
 
 `profile_fetch` enqueues `profile_media` (when an Instagram id is known) and
 `website_enrich` (when the profile has links). The media/website stages are

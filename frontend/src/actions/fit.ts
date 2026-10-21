@@ -47,18 +47,52 @@ export async function decideFit(input: {
   }
 }
 
-export async function requestContact(leadId: string): Promise<ActionResult> {
+export async function requestContact(
+  leadId: string,
+  searchAgain = false,
+): Promise<ActionResult> {
   await requireSession();
   if (!leadId) return { ok: false, message: "Missing lead id." };
   try {
-    await api.requestContact(leadId);
+    const request = await api.requestContact(leadId, "", searchAgain);
     revalidatePath(`/leads/${leadId}`);
-    return { ok: true, message: "Contact request queued." };
+    if (request.status === "found") {
+      return { ok: true, message: "Public contact found. Review it below." };
+    }
+    if (request.status === "not_found") {
+      return { ok: true, message: "No public contact found in searched sources." };
+    }
+    return { ok: true, message: "Contact search queued." };
   } catch (error) {
     return {
       ok: false,
       message:
         error instanceof ApiError ? error.message : "Could not request contact details.",
+    };
+  }
+}
+
+export async function addContact(
+  leadId: string,
+  input: { type: "email" | "phone"; value: string; sourceUrl: string },
+): Promise<ActionResult> {
+  await requireSession();
+  if (!leadId) return { ok: false, message: "Missing lead id." };
+  if (!input.value.trim() || !input.sourceUrl.trim()) {
+    return { ok: false, message: "Contact value and source URL are required." };
+  }
+  try {
+    await api.addContact(leadId, {
+      type: input.type,
+      value: input.value.trim(),
+      source_url: input.sourceUrl.trim(),
+    });
+    revalidatePath(`/leads/${leadId}`);
+    return { ok: true, message: "Contact added with source." };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof ApiError ? error.message : "Could not add the contact.",
     };
   }
 }

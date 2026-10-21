@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.leads.schemas import LeadResponse
+from app.leads.schemas import ContactRequestOut, LeadResponse
 from app.db.schemas import (
     Dossier,
     LeadPost,
@@ -209,6 +209,7 @@ class LeadDetailOut(BaseModel):
     posts: list[PostOut] = Field(default_factory=list)
     website_pages: list[WebsitePageOut] = Field(default_factory=list)
     contacts: list[ContactOut] = Field(default_factory=list)
+    contact_request: ContactRequestOut | None = None
     jobs: list[JobOut] = Field(default_factory=list)
 
 

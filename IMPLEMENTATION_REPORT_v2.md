@@ -3,7 +3,7 @@
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_PRD_v2_Creator_Review.md` (v2.0, 20 October 2026)
 **Report date:** 2026-10-19
-**Status:** V2-01, V2-02, V2-03, V2-04, and V2-05 **Complete**. V2-06 through V2-09 are tracked but not started.
+**Status:** V2-01, V2-02, V2-03, V2-04, V2-05, and V2-06 **Complete**. V2-07 through V2-09 are tracked but not started.
 
 ---
 
@@ -16,7 +16,7 @@
 | V2-03 · Review and state | Separate research/fit, one campaign config, material-change rules, decision history | **COMPLETE** |
 | V2-04 · Brief and public contacts | Full non-AI evidence brief, incidental contact extraction/provenance, legacy migration | **COMPLETE** |
 | V2-05 · Extension reliability | Capture preview, scoped key, 50-item queue, connection/retry outcomes | **COMPLETE** |
-| V2-06 · Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | Not started |
+| V2-06 · Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | **COMPLETE** |
 | V2-07 · Drafts and manual history | Manual editor, optional generation, immutable versions, copy/export, sent/reply events | Not started |
 | V2-08 · Review workspace UX | Creators views/detail, contextual actions, live progress, responsive forms | Not started |
 | V2-09 · Migration and release QA | Safe backfill, compatibility, test isolation, end-to-end sign-off | Not started |
@@ -731,7 +731,7 @@ docs/api.md, docs/database.md, docs/worker.md
 
 ---
 
-## 6. V2-05 � Extension reliability (Complete)
+## 6. V2-05 � Extension reliability (Complete)
 
 ### 6.1 Capture preview and payload
 
@@ -820,4 +820,266 @@ extension/styles.css     queue item styles
 extension/package.json   NEW: test script
 extension/lib.test.js    10 new V2-05 tests
 extension/README.md      queue/settings/test docs
+```
+
+---
+
+## 7. V2-06 � Explicit discovery (Complete)
+
+### 7.1 Executable contact requests
+
+- `POST /api/v1/leads/{id}/contact-requests` now creates a durable request and
+  enqueues a new **`contact_discovery`** worker stage.
+- `ContactDiscoveryStage` performs a contact-focused pass over the lead's
+  supplied external links plus already-observed website pages, using the existing
+  bounded crawler (SSRF-safe, max 5 pages, depth 2, 10 s/request) and the same
+  email/phone extraction.
+- Discovered contacts are stored in `contacts` with
+  `method="contact_discovery"`, `source_url`, `observed_at`, and
+  `validation_state="unverified"`. They are visible immediately (no gate).
+
+### 7.2 Idempotency (V18)
+
+- A repeated click for the **same evidence version** returns the existing
+  in-flight/completed request with **HTTP 200** and the same `request_id`; no new
+  request row or job is created.
+- `search_again: true` creates a new attempt (HTTP 201). Any older queued/retrying
+  request for the lead is marked `cancelled` ("Superseded by a newer request").
+- If a queued discovery job still points at an older request, it is retargeted to
+  the new request payload.
+
+### 7.3 Statuses and revocation (V20)
+
+`contact_requests.status` lifecycle:
+
+`queued` -> `running` -> `found` | `not_found` | `failed` | `cancelled`
+
+- The request stores `evidence_version`, `searched_scope`, `result_count`,
+  `error`, `started_at`, and `completed_at`.
+- The shortlist gate is checked **before** the crawl and **again before
+  publishing**. If the creator becomes `rejected` or `review_needed` during the
+  pass, the request is marked `cancelled` and **no contacts are written**.
+- `failed` covers "no public sources" and "all sources blocked/unreachable";
+  `not_found` means sources were searched but produced no contact.
+
+### 7.4 Manual fallback
+
+- `GET /api/v1/leads/{id}/contact-requests` lists request history; the lead detail
+  exposes the latest `contact_request`.
+- The UI shows the request state, and on `not_found` displays
+  **"No public contact found in searched sources."** with the searched scope and
+  completion time.
+- `POST /api/v1/leads/{id}/contacts` adds a manual contact with
+  `type` (`email`/`phone`), `value`, and an **http(s) source URL**; it is stored
+  with `method="manual"` and `provenance="Public website"`. No fit gate is needed
+  for manual contact entry.
+- A "Search again" action is offered for terminal `not_found`/`failed`/`cancelled`
+  requests.
+
+### 7.5 Exact database/schema changes
+
+Migration **`f6a7b8c9d0e1_contact_discovery.py`** (down_revision
+`e5f6a7b8c9d0`):
+
+```text
+contact_requests
+  + evidence_version  INTEGER NOT NULL DEFAULT 0
+  + searched_scope    TEXT NOT NULL DEFAULT ''
+  + result_count      INTEGER NOT NULL DEFAULT 0
+  + error             TEXT NOT NULL DEFAULT ''
+  + started_at        VARCHAR(40) NOT NULL DEFAULT ''
+  + completed_at      VARCHAR(40) NOT NULL DEFAULT ''
+  + ix_contact_requests_lead_version (lead_id, evidence_version)
+  (data) status 'requested' -> 'failed' with
+         error='Legacy request not scheduled'   -- never silently bulk-run
+```
+
+Current migration head: **`f6a7b8c9d0e1`** (verified in PostgreSQL).
+
+### 7.6 API additions
+
+- `POST /leads/{id}/contact-requests` body `{ note?, search_again? }`;
+  `201` for a new attempt, `200` for a reused in-flight/completed request.
+- `GET /leads/{id}/contact-requests` � request history.
+- `POST /leads/{id}/contacts` � manual sourced contact.
+- `LeadDetailOut.contact_request` � latest request for the detail UI.
+
+### 7.7 Frontend
+
+- Contact & drafts shows the request state, searched scope/time, and the
+  `not_found` message.
+- The button becomes **Search again** after a terminal result.
+- **Add contact with source** form (type, value, source URL) in Public contacts.
+
+### 7.8 Tests (V2-06)
+
+New `tests/test_contact_discovery.py` (10 tests):
+
+1. `test_v17_contact_request_requires_current_shortlist`
+2. `test_v18_repeated_click_reuses_the_existing_request`
+3. `test_v18_search_again_creates_a_new_attempt`
+4. `test_v19_discovery_found_stores_contacts_and_scope`
+5. `test_v19_discovery_not_found_reports_searched_scope`
+6. `test_v19_discovery_blocked_sources_fail`
+7. `test_v20_revocation_before_run_cancels_without_contacts`
+8. `test_v20_revocation_during_run_does_not_publish`
+9. `test_manual_contact_with_source_is_saved`
+10. `test_manual_contact_requires_valid_source_and_type`
+
+### 7.9 Verification
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Backend | `python -m pytest` | **262 passed** |
+| Frontend lint | `npm run lint` | clean |
+| Frontend typecheck | `npx tsc --noEmit` | clean |
+| Frontend build | `npm run build` | success |
+| Migration head | `alembic_version` | `f6a7b8c9d0e1` |
+| Live gate | contact request on non-shortlisted lead | **403** |
+| Live manual contact | `POST /leads/{id}/contacts` | `201`, `method=manual`, public provenance |
+
+### 7.10 Files changed
+
+**Backend**
+
+```text
+app/constants.py                     contact discovery stage + request states/methods
+app/db/models.py                     ContactRequest evidence/scope/result/timestamps
+app/db/schemas.py                    matching row fields
+app/db/repository.py                 request lookup/update/latest, job retarget
+app/leads/service.py                 idempotent request, supersede, manual contact
+app/leads/schemas.py                 request status fields, search_again, manual contact
+app/leads/routes.py                  idempotent POST, request list, manual contact
+app/worker/pipeline.py               ContactDiscoveryStage + revocation checks
+app/worker/main.py                   register contact_discovery
+app/dashboard/{schemas,service,routes}.py  latest contact_request in detail
+alembic/versions/f6a7b8c9d0e1_contact_discovery.py
+tests/test_contact_discovery.py      NEW (10 tests)
+tests/test_fit_gates.py              status queued
+```
+
+**Frontend**
+
+```text
+lib/types.ts                         ContactRequest + LeadDetail.contact_request
+lib/api.ts                           requestContact(searchAgain), addContact
+actions/fit.ts                       search again + add contact
+components/outreach-gates.tsx        request state, scope/time, not-found copy
+components/manual-contact-form.tsx   NEW
+app/(dashboard)/leads/[leadId]/page.tsx  pass status, manual form
+```
+
+**Docs**
+
+```text
+docs/api.md, docs/database.md, docs/worker.md
+```
+
+---
+
+## Appendix A. Hotfix: strict contact extraction (V2-04/V2-06 regression)
+
+**Status:** Complete. Shipped after V2-06.
+
+### A.1 Problem
+
+The V2 crawler stored 416 `type='phone'` rows in `contacts` that were not phone
+numbers. Every one was numeric noise harvested from page source on
+`https://www.georgious.nl` (CSS dimensions, script constants, decimal prices):
+
+```text
+0 2.17-.01 2.444-.046 3.292-.036.858-.173 1.442-.374 1.943-.2.53-.474.976-.92 1.423
+10512572169863695511792575716
+4 4 0 0 0 3.99 4.27
+0000000000
+```
+
+Two root causes:
+
+1. `app/providers/website.py` extracted contacts from `html + " " + text` — the
+   **raw page source**, which is full of CSS values and script constants.
+2. `app/providers/emails.py` accepted any digit run of 10+ digits, or 8+ with a
+   leading `+`, so 30-digit tracking codes and decimal groups passed.
+
+A fabricated contact is worse than a missed one (PRD 4.4 - never guess
+addresses), so the extractor was tightened rather than loosened.
+
+### A.2 Phone extraction (strict, no new dependency)
+
+`app/providers/emails.py` now exposes `is_plausible_phone(value)` and validates
+every candidate. A candidate is kept only when **all** hold:
+
+| Rule | Detail |
+| --- | --- |
+| Shape | optional country code, then groups separated by single space/dash/dot, optionally parenthesised (`+1 (415) 555-0199`, `415-555-0199`, `01 23 45 67 89`) |
+| Digit count | 10-15 digits (8+ with a leading `+`); 15 is the E.164 maximum |
+| Not a date | `2026-10-19`, `19.10.2026` are rejected |
+| Group sizes | with `+` the first group is a 1-3 digit country code; without it the first group is 2-4 digits; every other group is 2-4 digits |
+| Group count | at most 6 groups |
+| Not degenerate | digits are not all identical (`0000000000`) |
+| Bare runs | a contiguous run with no separators is accepted only in pure E.164 form (`+<digits>`); bare IDs/hashes/timestamps are rejected |
+
+`phonenumbers` was **not** added: it is not installed and the environment's
+PyPI throughput (~15 kB/s) makes the new dependency - and the Docker rebuild it
+implies - a poor trade for a hotfix. The rules above are dependency-free and
+fully covered by tests.
+
+### A.3 Email extraction (audit)
+
+`extract_emails` now rejects, in addition to the previous filters:
+
+- **image / retina filenames** - `logo@2x.png`, `hero@3x.jpg`, `banner@2x.webp`
+  (matched by `IMAGE_FILENAME_EMAIL_RE`, plus the existing asset-suffix list);
+- **transactional senders** - `noreply@`, `no-reply@`, `no_reply@`,
+  `donotreply@`, `do-not-reply@`, `mailer-daemon@`, `postmaster@`.
+
+### A.4 Crawler hardening
+
+`app/providers/website.py` no longer scans raw HTML for contacts. Contacts come
+from the **visible text** plus explicit `mailto:`/`tel:` links; `tel:` hrefs are
+read directly and accepted when they pass `is_plausible_phone`.
+
+### A.5 Database cleanup
+
+`scripts/clean_garbage_phones.py` (one-off, supports `--dry-run`) deletes
+`type='phone'` rows that the strict extractor would never produce: more than 15
+digits, decimal prices, single-digit groups, or any value that fails
+`is_plausible_phone`. It reuses the extraction rules, so the cleanup and the
+extractor cannot drift.
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\clean_garbage_phones.py --dry-run
+.\backend\.venv\Scripts\python.exe scripts\clean_garbage_phones.py
+```
+
+Live result: **416 garbage phone rows deleted**, 0 phone rows remaining, 4
+legitimate legacy email rows untouched.
+
+### A.6 Tests
+
+`tests/test_contact_extraction.py` (NEW) asserts that
+`35771933781168458101792575716` and `4 4 0 0 0 3.99 4.27` (and the other
+observed garbage) are **ignored**, that real formats survive, and that image
+filenames / noreply addresses are rejected. `tests/test_website_crawler.py`
+gained two crawler-level regressions (CSS + tracking code in page source; a
+`tel:` link is used).
+
+### A.7 Verification
+
+| Check | Result |
+| --- | --- |
+| `python -m pytest` | **271 passed** |
+| Live DB phone rows | 416 -> **0** (4 legacy emails intact) |
+| `georgious.nl` (3 pages) re-crawl | 0 phones, 0 emails extracted (was 416 phones) |
+| `scripts/clean_garbage_phones.py --dry-run` | 0 garbage remaining |
+
+### A.8 Files changed
+
+```text
+backend/app/providers/emails.py       strict is_plausible_phone + email filters
+backend/app/providers/website.py      visible-text/tel-link extraction
+scripts/clean_garbage_phones.py       NEW (one-off DB cleanup)
+tests/test_contact_extraction.py      NEW (9 tests)
+tests/test_website_crawler.py         2 new crawler regressions
+docs/website-enrichment.md            contact extraction contract
 ```

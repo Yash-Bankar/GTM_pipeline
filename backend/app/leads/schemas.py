@@ -259,6 +259,26 @@ class ContactRequestCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     note: str = Field(default="", max_length=2000)
+    # Explicit "Search again" creates a new attempt for the same evidence version.
+    search_again: bool = False
+
+
+class ManualContactCreate(BaseModel):
+    """Operator-entered public contact with a source URL (V2-06)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["email", "phone"]
+    value: str = Field(..., min_length=1, max_length=512)
+    source_url: str = Field(..., min_length=1, max_length=1024)
+
+    @field_validator("source_url")
+    @classmethod
+    def _validate_source_url(cls, value: str) -> str:
+        text = value.strip()
+        if not text.lower().startswith(("http://", "https://")):
+            raise ValueError("Source URL must be an http(s) URL.")
+        return text
 
 
 class DraftRequestCreate(BaseModel):
@@ -274,7 +294,13 @@ class ContactRequestOut(BaseModel):
     lead_id: str
     status: str
     note: str
+    evidence_version: int = 0
+    searched_scope: str = ""
+    result_count: int = 0
+    error: str = ""
     requested_at: str
+    started_at: str = ""
+    completed_at: str = ""
     created_at: str
 
     @classmethod
@@ -284,9 +310,20 @@ class ContactRequestOut(BaseModel):
             lead_id=request.lead_id,
             status=request.status,
             note=request.note,
+            evidence_version=request.evidence_version,
+            searched_scope=request.searched_scope,
+            result_count=request.result_count,
+            error=request.error,
             requested_at=request.requested_at,
+            started_at=request.started_at,
+            completed_at=request.completed_at,
             created_at=request.created_at,
         )
+
+
+class ContactRequestListOut(BaseModel):
+    items: list[ContactRequestOut]
+    total: int
 
 
 class OutreachRevisionOut(BaseModel):

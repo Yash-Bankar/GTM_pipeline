@@ -22,6 +22,7 @@ from app.config import Settings, get_settings
 from app.constants import (
     STAGE_AI_DOSSIER,
     STAGE_AI_OUTREACH,
+    STAGE_CONTACT_DISCOVERY,
     STAGE_PROFILE_FETCH,
     STAGE_PROFILE_MEDIA,
     STAGE_WEBSITE_ENRICH,
@@ -35,6 +36,7 @@ from app.worker.pipeline import (
     AIDisabledStage,
     AIDossierStage,
     AIOutreachStage,
+    ContactDiscoveryStage,
     ProfileFetchStage,
     ProfileMediaStage,
     Stage,
@@ -187,6 +189,7 @@ def build_stages(settings: Settings) -> dict[str, Stage]:
             max_pages=settings.media_max_pages,
         ),
         STAGE_WEBSITE_ENRICH: WebsiteEnrichStage(crawler),
+        STAGE_CONTACT_DISCOVERY: ContactDiscoveryStage(crawler),
     }
 
     if ai_enabled:

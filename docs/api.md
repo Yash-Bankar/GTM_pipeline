@@ -169,13 +169,41 @@ Read or replace the single active campaign: `name`, `description`,
 unconfigured and increments on each `PUT`. Updating criteria marks current
 shortlists `review_needed`.
 
-### `POST /api/v1/leads/{lead_id}/contact-requests` (T08/V2-03)
+### `POST /api/v1/leads/{lead_id}/contact-requests` (T08/V2-03/V2-06)
 
-Queue an explicit request to find public contact details. **Requires
+Queue an explicit contact-discovery request. **Requires
 `fit_status == "shortlisted"` AND `decision_currency == "current"`**; otherwise
 returns `403` with
 `{"code": "FIT_APPROVAL_REQUIRED", "fit_status": ..., "decision_currency": ...}`.
-Body is optional: `{ "note": "..." }`. Returns `201` with the stored request.
+
+Body (optional): `{ "note": "...", "search_again": false }`.
+
+- Repeated clicks for the **same evidence version** return the existing
+  in-flight/completed request with **HTTP 200** and the same `request_id`.
+- `search_again: true` creates a new attempt (**HTTP 201**).
+- The request is processed by the `contact_discovery` worker stage.
+
+Lifecycle: `queued` → `running` → `found` | `not_found` | `failed` |
+`cancelled`. The response includes `evidence_version`, `searched_scope`,
+`result_count`, `error`, `started_at`, and `completed_at`. If the shortlist is
+revoked (rejected/review needed) before or during the pass, the request is
+`cancelled` and no contacts are published.
+
+### `GET /api/v1/leads/{lead_id}/contact-requests` (V2-06)
+
+List contact-discovery request history for a lead.
+
+### `POST /api/v1/leads/{lead_id}/contacts` (V2-06)
+
+Add a manual, sourced public contact (the fallback when discovery returns no
+result). No shortlist gate. Body:
+
+```json
+{ "type": "email", "value": "name@example.com", "source_url": "https://example.com/contact" }
+```
+
+`type` is `email` | `phone`; `source_url` must be an http(s) URL. Stored with
+`method="manual"` and `provenance="Public website"`.
 
 ### `POST /api/v1/leads/{lead_id}/draft-requests` (T08/V2-03)
 
@@ -218,7 +246,7 @@ List the outreach draft revision history for a lead, oldest first:
 
 ### `GET /api/v1/leads/{lead_id}/detail`
 
-Dashboard detail (lead, derived progress, posts, website pages, contacts, jobs).
+Dashboard detail (lead, derived progress, posts, website pages, contacts, latest `contact_request`, jobs).
 
 ## Behavior
 
