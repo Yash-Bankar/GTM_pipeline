@@ -45,7 +45,9 @@ export function StatusBadge({ status }: { status: string }) {
     value === "done" ||
     value === "enriched" ||
     value === "approved" ||
+    value === "shortlisted" ||
     value === "ready" ||
+    value === "complete" ||
     value === "found";
   return (
     <Badge tone={statusTone(status)}>

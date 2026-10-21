@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from app import __version__
+from app.campaigns.routes import router as campaign_router
 from app.config import get_settings
 from app.dashboard.routes import router as dashboard_router
 from app.db.errors import DuplicateLeadError, StorageError
@@ -36,6 +37,7 @@ app.add_middleware(
 
 app.include_router(leads_router)
 app.include_router(dashboard_router)
+app.include_router(campaign_router)
 
 
 def _problem(status_code: int, message: str) -> JSONResponse:

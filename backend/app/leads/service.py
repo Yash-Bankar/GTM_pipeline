@@ -14,14 +14,16 @@ from app.db.schemas import (
     CaptureReceipt,
     ContactRequest,
     EvidenceVersion,
+    FitDecision,
     Lead,
     OutreachRevision,
 )
-from app.db.util import new_job_id, utc_now_iso
+from app.db.util import new_job_id, utc_now_iso, utc_now_iso_precise
 
 from .evidence import (
     changed_snapshot_fields,
     field_provenance,
+    material_change_reasons,
     merge_snapshot,
     payload_hash,
     recency,
@@ -64,11 +66,14 @@ class LeadSubmission:
 
 
 class FitNotApprovedError(Exception):
-    """Raised when a contact/draft request is made before fit approval (T08)."""
+    """Raised when a contact/draft request is not allowed by the fit gate (T08/V2-03)."""
 
-    def __init__(self, fit_status: str) -> None:
+    def __init__(
+        self, fit_status: str, decision_currency: str = "current"
+    ) -> None:
         super().__init__(fit_status)
         self.fit_status = fit_status
+        self.decision_currency = decision_currency
 
 
 class RequestIdConflictError(Exception):
@@ -202,8 +207,51 @@ class LeadService:
                         fields["request_id"] = request.request_id
                     fields["evidence_version"] = version_number
                     fields["evidence_version_id"] = version.evidence_version_id
+
+                    campaign = self._repo.get_active_campaign()
+                    prior_status = lead.fit_status or constants.FIT_STATUS_NOT_REVIEWED
+                    material: list[str] = []
+                    if prior_status == constants.FIT_STATUS_SHORTLISTED and changed:
+                        material = material_change_reasons(
+                            current_snapshot,
+                            merged,
+                            follower_min=campaign.follower_min if campaign else 0,
+                            follower_max=campaign.follower_max if campaign else 0,
+                        )
+                        if material:
+                            fields["decision_currency"] = (
+                                constants.DECISION_CURRENCY_REVIEW_NEEDED
+                            )
+                            fields["decision_currency_reason"] = "; ".join(material)
+                    if prior_status == constants.FIT_STATUS_REJECTED and changed:
+                        fields["new_evidence_available"] = True
+
                     lead = self._repo.update_lead(lead.lead_id, fields) or lead
                     applied = bool(changed)
+
+                    if prior_status == constants.FIT_STATUS_SHORTLISTED and material:
+                        self._record_decision(
+                            lead.lead_id,
+                            action="review_needed",
+                            fit_status=constants.FIT_STATUS_SHORTLISTED,
+                            decision_currency=constants.DECISION_CURRENCY_REVIEW_NEEDED,
+                            evidence_version=version_number,
+                            criteria_version=campaign.version if campaign else 0,
+                            note="; ".join(material),
+                            actor=constants.FIT_ACTOR_SYSTEM,
+                        )
+                    elif prior_status == constants.FIT_STATUS_REJECTED and changed:
+                        self._record_decision(
+                            lead.lead_id,
+                            action="new_evidence",
+                            fit_status=constants.FIT_STATUS_REJECTED,
+                            decision_currency=lead.decision_currency
+                            or constants.DECISION_CURRENCY_CURRENT,
+                            evidence_version=version_number,
+                            criteria_version=campaign.version if campaign else 0,
+                            note="New evidence available",
+                            actor=constants.FIT_ACTOR_SYSTEM,
+                        )
                 # Stale evidence is retained as immutable history but does not
                 # mutate the lead or advance the current evidence pointer.
                 outcome = (
@@ -283,24 +331,55 @@ class LeadService:
         return (lead, progress, remedy)
 
     def decide_fit(self, lead_id: str, *, action: str, note: str = "") -> Lead | None:
-        """Record a manual fit decision (T08).
+        """Record a manual fit decision with history (V2-03).
 
-        ``action`` is one of ``approve``/``reject``/``need_evidence``. A rejection
-        requires a note. Returns ``None`` when the lead does not exist.
+        Actions: ``shortlist``, ``research_more``, ``reject``, ``reopen``.
+        Pre-v2 names ``approve``/``need_evidence`` are accepted as aliases.
+        A rejection requires a note; a rejected creator must be reopened before
+        any other decision, and reopen always returns to ``not_reviewed``.
         """
-        if self._repo.get_lead(lead_id) is None:
+        lead = self._repo.get_lead(lead_id)
+        if lead is None:
             return None
+
+        action = constants.FIT_ACTION_ALIASES.get(action, action)
         status = constants.FIT_ACTIONS.get(action)
         if status is None:
             raise ValueError(f"Unknown fit action '{action}'.")
-        if status == constants.FIT_STATUS_REJECTED and not note.strip():
+
+        current = lead.fit_status or constants.FIT_STATUS_NOT_REVIEWED
+        text = note.strip()
+        if status == constants.FIT_STATUS_REJECTED and not text:
             raise ValueError("A note is required when rejecting a creator.")
-        return self._repo.set_fit_decision(
+        if current == constants.FIT_STATUS_REJECTED and action != "reopen":
+            raise ValueError("A rejected creator must be reopened before another decision.")
+        if action == "reopen" and current != constants.FIT_STATUS_REJECTED:
+            raise ValueError("Only a rejected creator can be reopened.")
+
+        campaign = self._repo.get_active_campaign()
+        updated = self._repo.set_fit_decision(
             lead_id,
             status=status,
-            note=note.strip(),
+            note=text,
             decided_at=utc_now_iso(),
+            currency=constants.DECISION_CURRENCY_CURRENT,
+            currency_reason="",
+            new_evidence=False,
         )
+        self._record_decision(
+            lead_id,
+            action=action,
+            fit_status=status,
+            decision_currency=constants.DECISION_CURRENCY_CURRENT,
+            evidence_version=lead.evidence_version,
+            criteria_version=campaign.version if campaign else 0,
+            note=text,
+            actor=constants.FIT_ACTOR_OPERATOR,
+        )
+        return updated
+
+    def list_fit_decisions(self, lead_id: str) -> list[FitDecision]:
+        return self._repo.list_fit_decisions(lead_id)
 
     def request_contact(self, lead_id: str, *, note: str = "") -> ContactRequest | None:
         """Queue an explicit contact request; requires an approved fit (T08)."""
@@ -344,8 +423,39 @@ class LeadService:
 
     def _require_approved(self, lead: Lead) -> None:
         fit_status = lead.fit_status or constants.FIT_STATUS_NOT_REVIEWED
-        if fit_status != constants.FIT_STATUS_APPROVED:
-            raise FitNotApprovedError(fit_status)
+        currency = lead.decision_currency or constants.DECISION_CURRENCY_CURRENT
+        if (
+            fit_status != constants.FIT_STATUS_SHORTLISTED
+            or currency != constants.DECISION_CURRENCY_CURRENT
+        ):
+            raise FitNotApprovedError(fit_status, currency)
+
+    def _record_decision(
+        self,
+        lead_id: str,
+        *,
+        action: str,
+        fit_status: str,
+        decision_currency: str,
+        evidence_version: int,
+        criteria_version: int,
+        note: str,
+        actor: str,
+    ) -> None:
+        self._repo.create_fit_decision(
+            FitDecision(
+                decision_id=new_job_id("fd"),
+                lead_id=lead_id,
+                action=action,
+                fit_status=fit_status,
+                decision_currency=decision_currency,
+                evidence_version=int(evidence_version or 0),
+                criteria_version=int(criteria_version or 0),
+                note=note,
+                actor=actor,
+                created_at=utc_now_iso_precise(),
+            )
+        )
 
     def list(
         self,

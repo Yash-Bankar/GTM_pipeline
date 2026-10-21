@@ -26,7 +26,7 @@ import {
   splitUrls,
 } from "@/lib/format";
 import { requireSession } from "@/lib/session";
-import type { OutreachRevision } from "@/lib/types";
+import type { FitDecision as FitDecisionRecord, OutreachRevision } from "@/lib/types";
 
 type Params = Promise<{ leadId: string }>;
 
@@ -65,11 +65,25 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
     revisions = [];
   }
 
+  let decisions: FitDecisionRecord[] = [];
+  try {
+    decisions = (await api.listFitDecisions(leadId)).items;
+  } catch {
+    decisions = [];
+  }
+
   const { lead, progress, progress_remedy: remedy, posts, website_pages: pages, jobs } = detail;
   const snapshot = lead.snapshot;
   const links = splitUrls(lead.all_external_urls);
   const postsEmpty = postsEmptyCopy(lead.media_status);
-  const approved = lead.fit_status === "approved";
+  const outreachEnabled =
+    lead.fit_status === "shortlisted" && lead.decision_currency === "current";
+  const gateReason =
+    lead.fit_status !== "shortlisted"
+      ? "Shortlist this creator with current evidence before requesting contact details or drafts."
+      : lead.decision_currency !== "current"
+        ? "Review needed: evidence changed since the shortlist. Reconfirm fit before preparing outreach."
+        : "";
 
   return (
     <>
@@ -264,13 +278,54 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
               fitStatus={lead.fit_status}
               fitNote={lead.fit_note}
               fitDecidedAt={lead.fit_decided_at}
+              decisionCurrency={lead.decision_currency}
+              currencyReason={lead.decision_currency_reason}
+              newEvidenceAvailable={lead.new_evidence_available}
             />
           </Card>
 
           <Card>
-            <CardHeader title="Contact & drafts" subtitle="Requires an approved fit" />
-            <OutreachGates leadId={lead.lead_id} approved={approved} />
+            <CardHeader
+              title="Contact & drafts"
+              subtitle="Requires a current shortlist"
+            />
+            <OutreachGates
+              leadId={lead.lead_id}
+              enabled={outreachEnabled}
+              reason={gateReason}
+            />
           </Card>
+
+          {decisions.length > 0 ? (
+            <Card>
+              <CardHeader
+                title="Decision history"
+                subtitle={`${decisions.length} event${decisions.length === 1 ? "" : "s"}`}
+              />
+              <ul className="divide-y divide-ink-800">
+                {decisions.map((decision) => (
+                  <li key={decision.decision_id} className="px-5 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-mist-100">{humanize(decision.action)}</span>
+                      <Badge
+                        tone={decision.decision_currency === "review_needed" ? "amber" : "neutral"}
+                      >
+                        {humanize(decision.decision_currency)}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 font-mono text-[11px] text-mist-400">
+                      {humanize(decision.fit_status)} · evidence v{decision.evidence_version} ·
+                      criteria v{decision.criteria_version} · {formatDate(decision.created_at)} ·{" "}
+                      {decision.actor}
+                    </p>
+                    {decision.note ? (
+                      <p className="mt-1 text-xs text-mist-300">{decision.note}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader title="Processing" subtitle="Re-run stages manually" />

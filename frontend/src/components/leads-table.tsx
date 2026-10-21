@@ -55,6 +55,12 @@ export function LeadsTable({ leads }: { leads: Lead[] }) {
               <td className="px-4 py-3">
                 <div className="flex flex-col gap-1">
                   <StatusBadge status={lead.progress} />
+                  {lead.decision_currency === "review_needed" ? (
+                    <Badge tone="amber">Review needed</Badge>
+                  ) : null}
+                  {lead.new_evidence_available ? (
+                    <Badge tone="blue">New evidence</Badge>
+                  ) : null}
                   {lead.progress === "blocked" && lead.progress_remedy ? (
                     <span className="max-w-xs text-[11px] leading-snug text-rose-alert">
                       {lead.progress_remedy}

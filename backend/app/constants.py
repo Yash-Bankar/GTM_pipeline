@@ -41,12 +41,14 @@ AI_STATUS_NEEDS_REVIEW = "NEEDS_REVIEW"
 AI_STATUS_INSUFFICIENT = "insufficient_evidence"
 AI_STATUS_ERROR = "error"
 
-# Derived research/progress states (PRD §10). These are computed from persisted
-# jobs + the lead, and returned consistently by list, detail and stats.
+# Derived research/progress states (PRD §10; V2-03 uses "complete").
+# These are computed from persisted jobs + the lead, and returned consistently by
+# list, detail and stats.
 RESEARCH_NEEDS_DATA = "needs_data"
 RESEARCH_QUEUED = "queued"
 RESEARCH_RUNNING = "running"
-RESEARCH_READY = "ready"
+RESEARCH_COMPLETE = "complete"
+RESEARCH_READY = RESEARCH_COMPLETE  # deprecated alias (pre-v2 name)
 RESEARCH_BLOCKED = "blocked"
 
 # Research stages (profile + media + website + dossier). Outreach belongs to the
@@ -67,23 +69,43 @@ DRAFT_REVIEW_STATUSES = (AI_STATUS_NEEDS_REVIEW, "APPROVED", "REJECTED")
 # Stable error code returned when an AI action is requested but AI is unavailable.
 ERROR_AI_UNAVAILABLE = "AI_UNAVAILABLE"
 
-# Fit-decision dimension (PRD §10). Separate from research progress and drafts.
+# Fit-decision dimension (V2-03). Separate from research progress and drafts.
 FIT_STATUS_NOT_REVIEWED = "not_reviewed"
-FIT_STATUS_APPROVED = "approved"
+FIT_STATUS_RESEARCH_MORE = "research_more"
+FIT_STATUS_SHORTLISTED = "shortlisted"
 FIT_STATUS_REJECTED = "rejected"
-FIT_STATUS_NEEDS_EVIDENCE = "needs_evidence"
 FIT_STATUSES = (
     FIT_STATUS_NOT_REVIEWED,
-    FIT_STATUS_APPROVED,
+    FIT_STATUS_RESEARCH_MORE,
+    FIT_STATUS_SHORTLISTED,
     FIT_STATUS_REJECTED,
-    FIT_STATUS_NEEDS_EVIDENCE,
 )
-# Action -> stored fit status (reject requires a note, enforced in the service).
+# Backward-compatible aliases (pre-v2 names); storage always uses the v2 values.
+FIT_STATUS_APPROVED = FIT_STATUS_SHORTLISTED
+FIT_STATUS_NEEDS_EVIDENCE = FIT_STATUS_RESEARCH_MORE
+
+# Action -> stored fit status. Reject requires a note; reopen returns a rejected
+# creator to not_reviewed (never directly to shortlisted).
 FIT_ACTIONS = {
-    "approve": FIT_STATUS_APPROVED,
+    "shortlist": FIT_STATUS_SHORTLISTED,
+    "research_more": FIT_STATUS_RESEARCH_MORE,
     "reject": FIT_STATUS_REJECTED,
-    "need_evidence": FIT_STATUS_NEEDS_EVIDENCE,
+    "reopen": FIT_STATUS_NOT_REVIEWED,
 }
+# Accept the pre-v2 action names from older callers / UI.
+FIT_ACTION_ALIASES = {
+    "approve": "shortlist",
+    "need_evidence": "research_more",
+}
+
+# Decision currency: whether a shortlist still matches material evidence.
+DECISION_CURRENCY_CURRENT = "current"
+DECISION_CURRENCY_REVIEW_NEEDED = "review_needed"
+DECISION_CURRENCIES = (DECISION_CURRENCY_CURRENT, DECISION_CURRENCY_REVIEW_NEEDED)
+
+# Shared dashboard authentication does not identify a named employee.
+FIT_ACTOR_OPERATOR = "shared dashboard operator"
+FIT_ACTOR_SYSTEM = "system"
 
 # Draft channels accepted by explicit draft requests.
 DRAFT_CHANNELS = ("email", "instagram_dm")

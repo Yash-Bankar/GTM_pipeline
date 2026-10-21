@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
@@ -99,7 +99,7 @@ def test_list_search_and_status_filter(api_client, repo: Repository) -> None:
     assert found["items"][0]["username"] == "alpha.one"
 
     # The status filter matches the derived progress, not the raw lead status.
-    ready = api_client.get("/api/v1/leads", params={"status": "ready"}).json()
+    ready = api_client.get("/api/v1/leads", params={"status": "complete"}).json()
     assert ready["total"] == 1
     assert ready["items"][0]["username"] == "alpha.one"
 

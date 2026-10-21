@@ -25,6 +25,11 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def utc_now_iso_precise() -> str:
+    """Current UTC time with microseconds (stable ordering for history rows)."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def stringify(value: object) -> str:
     if value is None:
         return ""

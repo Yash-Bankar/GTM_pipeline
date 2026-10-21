@@ -19,6 +19,9 @@ from app import constants
 
 from .errors import DuplicateLeadError
 from .models import (
+    Campaign as CampaignORM,
+)
+from .models import (
     CaptureReceipt as CaptureReceiptORM,
 )
 from .models import (
@@ -29,6 +32,9 @@ from .models import (
 )
 from .models import (
     EvidenceVersion as EvidenceVersionORM,
+)
+from .models import (
+    FitDecision as FitDecisionORM,
 )
 from .models import (
     Lead as LeadORM,
@@ -53,10 +59,12 @@ from .models import (
 )
 from .progress import derive_research_status, research_remedy
 from .schemas import (
+    Campaign,
     CaptureReceipt,
     ContactRequest,
     Dossier,
     EvidenceVersion,
+    FitDecision,
     Lead,
     LeadPost,
     OutreachEntry,
@@ -68,6 +76,7 @@ from .schemas import (
 from .util import new_job_id, new_lead_id, normalize_username, utc_now_iso
 
 _LEAD_INT_FIELDS = {"follower_count", "follows_count"}
+_LEAD_BOOL_FIELDS = {"new_evidence_available"}
 _LEAD_FIELDS = {column.name for column in LeadORM.__table__.columns}
 _OUTREACH_FIELDS = {"status", "subject", "body", "dm_body", "channel", "model", "generated_at"}
 
@@ -267,7 +276,9 @@ class Repository:
         for key, value in fields.items():
             if key not in _LEAD_FIELDS:
                 continue
-            if key in _LEAD_INT_FIELDS:
+            if key in _LEAD_BOOL_FIELDS:
+                setattr(row, key, bool(value))
+            elif key in _LEAD_INT_FIELDS:
                 try:
                     setattr(row, key, int(value) if value not in (None, "") else 0)
                 except (TypeError, ValueError):
@@ -394,12 +405,83 @@ class Repository:
     # -- fit decisions + explicit requests (T08) ---------------------------
 
     def set_fit_decision(
-        self, lead_id: str, *, status: str, note: str, decided_at: str
+        self,
+        lead_id: str,
+        *,
+        status: str,
+        note: str,
+        decided_at: str,
+        currency: str | None = None,
+        currency_reason: str | None = None,
+        new_evidence: bool | None = None,
     ) -> Lead | None:
-        return self.update_lead(
-            lead_id,
-            {"fit_status": status, "fit_note": note, "fit_decided_at": decided_at},
+        fields: dict[str, object] = {
+            "fit_status": status,
+            "fit_note": note,
+            "fit_decided_at": decided_at,
+        }
+        if currency is not None:
+            fields["decision_currency"] = currency
+        if currency_reason is not None:
+            fields["decision_currency_reason"] = currency_reason
+        if new_evidence is not None:
+            fields["new_evidence_available"] = new_evidence
+        return self.update_lead(lead_id, fields)
+
+    # -- campaign + fit decision history (V2-03) ----------------------------
+
+    def get_active_campaign(self) -> Campaign | None:
+        row = self.session.scalar(
+            select(CampaignORM)
+            .where(CampaignORM.is_active.is_(True))
+            .order_by(CampaignORM.version.desc())
+            .limit(1)
         )
+        return Campaign.model_validate(row) if row is not None else None
+
+    def upsert_campaign(self, campaign: Campaign) -> Campaign:
+        now = utc_now_iso()
+        for row in self.session.scalars(
+            select(CampaignORM).where(CampaignORM.is_active.is_(True))
+        ).all():
+            if row.campaign_id != campaign.campaign_id:
+                row.is_active = False
+                row.updated_at = now
+        existing = self.session.get(CampaignORM, campaign.campaign_id)
+        data = campaign.model_dump()
+        data["created_at"] = data.get("created_at") or now
+        data["updated_at"] = now
+        if existing is None:
+            row = CampaignORM(**data)
+            self.session.add(row)
+        else:
+            row = existing
+            for key, value in data.items():
+                setattr(row, key, value)
+        self.session.commit()
+        return Campaign.model_validate(row)
+
+    def create_fit_decision(self, decision: FitDecision) -> FitDecision:
+        data = decision.model_dump()
+        data["created_at"] = data.get("created_at") or utc_now_iso()
+        row = FitDecisionORM(**data)
+        self.session.add(row)
+        self.session.commit()
+        return FitDecision.model_validate(row)
+
+    def list_fit_decisions(self, lead_id: str) -> list[FitDecision]:
+        rows = self.session.scalars(
+            select(FitDecisionORM)
+            .where(FitDecisionORM.lead_id == lead_id)
+            .order_by(FitDecisionORM.created_at, FitDecisionORM.decision_id)
+        ).all()
+        return [FitDecision.model_validate(row) for row in rows]
+
+    def list_shortlisted_leads(self) -> list[Lead]:
+        rows = self.session.scalars(
+            select(LeadORM).where(LeadORM.fit_status == constants.FIT_STATUS_SHORTLISTED)
+        ).all()
+        return [Lead.model_validate(row) for row in rows]
 
     def create_contact_request(self, request: ContactRequest) -> ContactRequest:
         now = utc_now_iso()

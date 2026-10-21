@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const STATUS_OPTIONS = ["", "needs_data", "queued", "running", "ready", "blocked"];
+const STATUS_OPTIONS = ["", "needs_data", "queued", "running", "complete", "blocked"];
 
 export function LeadFilters({ q, status }: { q?: string; status?: string }) {
   return (

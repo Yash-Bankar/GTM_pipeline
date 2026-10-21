@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
 import { requireSession } from "@/lib/session";
 
-export type FitAction = "approve" | "reject" | "need_evidence";
+export type FitAction = "shortlist" | "research_more" | "reject" | "reopen";
 
 export interface ActionResult {
   ok: boolean;
@@ -14,9 +14,10 @@ export interface ActionResult {
 }
 
 const FIT_MESSAGES: Record<FitAction, string> = {
-  approve: "Fit approved. Contact and draft requests are now enabled.",
-  reject: "Fit rejected.",
-  need_evidence: "Marked as needing more evidence.",
+  shortlist: "Creator shortlisted. Contact and draft requests are now enabled.",
+  research_more: "Marked as needing more research.",
+  reject: "Creator rejected.",
+  reopen: "Creator reopened to Not reviewed.",
 };
 
 export async function decideFit(input: {

@@ -6,7 +6,7 @@ UTC strings so ordering and the existing string comparisons are preserved.
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -45,10 +45,13 @@ class Lead(Base):
     # Current evidence pointer (V2-02). Versions themselves are immutable rows.
     evidence_version: Mapped[int] = mapped_column(Integer, default=0)
     evidence_version_id: Mapped[str] = mapped_column(String(64), default="", index=True)
-    # Fit-decision dimension (PRD T08). Independent of research progress.
+    # Fit-decision dimension (V2-03). Independent of research progress.
     fit_status: Mapped[str] = mapped_column(String(32), default="not_reviewed", index=True)
     fit_note: Mapped[str] = mapped_column(Text, default="")
     fit_decided_at: Mapped[str] = mapped_column(String(40), default="")
+    decision_currency: Mapped[str] = mapped_column(String(32), default="current", index=True)
+    decision_currency_reason: Mapped[str] = mapped_column(Text, default="")
+    new_evidence_available: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[str] = mapped_column(String(40), default="")
     updated_at: Mapped[str] = mapped_column(String(40), default="")
 
@@ -284,3 +287,40 @@ class EvidenceVersion(Base):
     field_provenance: Mapped[str] = mapped_column(Text, default="")
     changed_fields: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class Campaign(Base):
+    """A single active campaign configuration (V2-03)."""
+
+    __tablename__ = "campaigns"
+
+    campaign_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    target_topics: Mapped[str] = mapped_column(Text, default="")  # JSON list
+    language: Mapped[str] = mapped_column(String(32), default="")
+    follower_min: Mapped[int] = mapped_column(Integer, default=0)
+    follower_max: Mapped[int] = mapped_column(Integer, default=0)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    updated_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class FitDecision(Base):
+    """Append-only fit decision / invalidation history (V2-03)."""
+
+    __tablename__ = "fit_decisions"
+
+    decision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    action: Mapped[str] = mapped_column(String(32), default="")
+    fit_status: Mapped[str] = mapped_column(String(32), default="")
+    decision_currency: Mapped[str] = mapped_column(String(32), default="current")
+    evidence_version: Mapped[int] = mapped_column(Integer, default=0)
+    criteria_version: Mapped[int] = mapped_column(Integer, default=0)
+    note: Mapped[str] = mapped_column(Text, default="")
+    actor: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default="", index=True)

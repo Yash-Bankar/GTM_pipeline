@@ -13,10 +13,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 __all__ = [
     "changed_snapshot_fields",
     "field_provenance",
+    "material_change_reasons",
     "merge_snapshot",
     "payload_hash",
     "recency",
@@ -219,3 +221,66 @@ def payload_hash(username: str, source: str, snapshot: dict | None) -> str:
     payload = {"username": username, "source": source or "", "snapshot": snapshot}
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _domain(url: object) -> str:
+    if not isinstance(url, str):
+        return ""
+    try:
+        host = urlparse(url.strip()).netloc.lower().removeprefix("www.")
+    except ValueError:
+        return ""
+    return host
+
+
+def external_domains(snapshot: dict) -> set[str]:
+    return {
+        domain
+        for domain in (_domain(url) for url in (snapshot or {}).get("external_urls") or [])
+        if domain
+    }
+
+
+def _in_range(value: int, minimum: int, maximum: int) -> bool:
+    if minimum and value < minimum:
+        return False
+    if maximum and value > maximum:
+        return False
+    return True
+
+
+def material_change_reasons(
+    before: dict,
+    after: dict,
+    *,
+    follower_min: int = 0,
+    follower_max: int = 0,
+) -> list[str]:
+    """Deterministic material-change classification (V2-03).
+
+    Only bio changes, external-domain changes, and follower counts crossing an
+    explicitly configured campaign threshold are material. Timestamp-only or
+    display-only recaptures are not.
+    """
+    before = before or {}
+    after = after or {}
+    reasons: list[str] = []
+
+    if str(before.get("bio") or "").strip() != str(after.get("bio") or "").strip():
+        reasons.append("Bio changed")
+
+    if external_domains(before) != external_domains(after):
+        reasons.append("External domain changed")
+
+    previous = _count_value(before.get("followers"))
+    current = _count_value(after.get("followers"))
+    if (
+        previous is not None
+        and current is not None
+        and (follower_min or follower_max)
+        and _in_range(previous, follower_min, follower_max)
+        != _in_range(current, follower_min, follower_max)
+    ):
+        reasons.append("Follower count crossed the campaign threshold")
+
+    return reasons

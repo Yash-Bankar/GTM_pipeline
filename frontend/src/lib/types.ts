@@ -44,10 +44,14 @@ export interface Lead {
   website_status: string;
   progress: string;
   progress_remedy: string;
+  research_status: string;
   snapshot: ProfileSnapshot | null;
   fit_status: string;
   fit_note: string;
   fit_decided_at: string;
+  decision_currency: string;
+  decision_currency_reason: string;
+  new_evidence_available: boolean;
 }
 
 export interface LeadList {
@@ -226,3 +230,21 @@ export interface Brief {
   model: string;
 }
 
+
+export interface FitDecision {
+  decision_id: string;
+  lead_id: string;
+  action: string;
+  fit_status: string;
+  decision_currency: string;
+  evidence_version: number;
+  criteria_version: number;
+  note: string;
+  actor: string;
+  created_at: string;
+}
+
+export interface FitDecisionList {
+  items: FitDecision[];
+  total: number;
+}

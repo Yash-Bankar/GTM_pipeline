@@ -31,8 +31,10 @@ preserved.
 `all_external_urls`, `engagement_rate`, `scraped_at`, `status`, `source`,
 `media_status`, `website_status`, `last_error`, `profile_snapshot` (JSON text),
 `request_id` (indexed), `evidence_version` (current pointer integer),
-`evidence_version_id` (indexed), `fit_status` (`not_reviewed`/`approved`/
-`rejected`/`needs_evidence`, indexed), `fit_note`, `fit_decided_at`, timestamps.
+`evidence_version_id` (indexed), `fit_status` (`not_reviewed`/`research_more`/
+`shortlisted`/`rejected`, indexed), `fit_note`, `fit_decided_at`,
+`decision_currency` (`current`/`review_needed`, indexed),
+`decision_currency_reason`, `new_evidence_available`, timestamps.
 
 ### `capture_receipts` (PK `request_id`) — V2-02
 `lead_id` → `leads` (cascade), `payload_hash`, `outcome` (`new`/`updated`/
@@ -45,6 +47,19 @@ id + payload returns the original lead; a different payload is a 409 conflict.
 `received_at` (server ordering), `parser_version`, `field_provenance` (JSON),
 `changed_fields` (JSON), `created_at`. Older versions are retained; the lead's
 `evidence_version`/`evidence_version_id` point at the current one.
+
+### `campaigns` (PK `campaign_id`) — V2-03
+`name`, `description`, `target_topics` (JSON list), `language`, `follower_min`,
+`follower_max` (0 = no bound), `version` (increments on update), `is_active`
+(indexed), `created_at`, `updated_at`. One active campaign; there is no seeded
+default.
+
+### `fit_decisions` (PK `decision_id`) — V2-03
+`lead_id` → `leads` (cascade), `action` (`shortlist`/`research_more`/`reject`/
+`reopen`/`review_needed`/`new_evidence`), `fit_status`, `decision_currency`,
+`evidence_version`, `criteria_version`, `note`, `actor`
+(`shared dashboard operator`/`system`), `created_at` (microsecond precision).
+Append-only history.
 
 ### `lead_posts` (PK `post_id`)
 `lead_id` → `leads` (cascade), `username`, `username_normalized`, `media_type`,

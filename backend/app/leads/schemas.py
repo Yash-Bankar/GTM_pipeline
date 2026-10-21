@@ -162,8 +162,12 @@ class LeadResponse(BaseModel):
     fit_status: str = "not_reviewed"
     fit_note: str = ""
     fit_decided_at: str = ""
+    decision_currency: str = "current"
+    decision_currency_reason: str = ""
+    new_evidence_available: bool = False
     evidence_version: int = 0
     evidence_version_id: str = ""
+    research_status: str = "needs_data"
 
     @classmethod
     def from_lead(
@@ -199,8 +203,12 @@ class LeadResponse(BaseModel):
             fit_status=lead.fit_status or "not_reviewed",
             fit_note=lead.fit_note,
             fit_decided_at=lead.fit_decided_at,
+            decision_currency=lead.decision_currency or "current",
+            decision_currency_reason=lead.decision_currency_reason,
+            new_evidence_available=lead.new_evidence_available,
             evidence_version=lead.evidence_version,
             evidence_version_id=lead.evidence_version_id,
+            research_status=progress,
         )
 
 
@@ -233,7 +241,15 @@ class FitDecisionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["approve", "reject", "need_evidence"]
+    action: Literal[
+        "shortlist",
+        "research_more",
+        "reject",
+        "reopen",
+        # pre-v2 aliases
+        "approve",
+        "need_evidence",
+    ]
     note: str = Field(default="", max_length=2000)
 
 
@@ -301,4 +317,37 @@ class OutreachRevisionOut(BaseModel):
 
 class OutreachRevisionListOut(BaseModel):
     items: list[OutreachRevisionOut]
+    total: int
+
+
+class FitDecisionOut(BaseModel):
+    decision_id: str
+    lead_id: str
+    action: str
+    fit_status: str
+    decision_currency: str
+    evidence_version: int
+    criteria_version: int
+    note: str
+    actor: str
+    created_at: str
+
+    @classmethod
+    def from_model(cls, decision) -> "FitDecisionOut":
+        return cls(
+            decision_id=decision.decision_id,
+            lead_id=decision.lead_id,
+            action=decision.action,
+            fit_status=decision.fit_status,
+            decision_currency=decision.decision_currency,
+            evidence_version=decision.evidence_version,
+            criteria_version=decision.criteria_version,
+            note=decision.note,
+            actor=decision.actor,
+            created_at=decision.created_at,
+        )
+
+
+class FitDecisionListOut(BaseModel):
+    items: list[FitDecisionOut]
     total: int

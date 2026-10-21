@@ -9,17 +9,25 @@ import { cn } from "@/components/ui";
 const BUTTON =
   "min-h-11 rounded-lg px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400 disabled:cursor-not-allowed disabled:opacity-40";
 
-export function OutreachGates({ leadId, approved }: { leadId: string; approved: boolean }) {
+export function OutreachGates({
+  leadId,
+  enabled,
+  reason,
+}: {
+  leadId: string;
+  enabled: boolean;
+  reason: string;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [channel, setChannel] = useState<"email" | "instagram_dm">("email");
   const [feedback, setFeedback] = useState<ActionResult | null>(null);
 
   const gateId = `outreach-gate-${leadId}`;
-  const disabled = !approved || pending;
-  const gateProps = approved
+  const disabled = !enabled || pending;
+  const gateProps = enabled
     ? {}
-    : { "aria-describedby": gateId, title: "Approve fit first" };
+    : { "aria-describedby": gateId, title: reason || "Shortlist this creator first" };
 
   function run(task: () => Promise<ActionResult>) {
     startTransition(async () => {
@@ -31,13 +39,14 @@ export function OutreachGates({ leadId, approved }: { leadId: string; approved: 
 
   return (
     <div className="space-y-3 px-5 py-4">
-      {!approved ? (
+      {!enabled ? (
         <p
           id={gateId}
           role="note"
           className="rounded-lg border border-amber-glow/30 bg-amber-glow/10 px-3 py-2 text-xs text-amber-glow"
         >
-          Approve fit before requesting contact details or generating drafts.
+          {reason ||
+            "Shortlist this creator with current evidence before requesting contact details or drafts."}
         </p>
       ) : null}
 
@@ -46,10 +55,7 @@ export function OutreachGates({ leadId, approved }: { leadId: string; approved: 
         onClick={() => run(() => requestContact(leadId))}
         disabled={disabled}
         {...gateProps}
-        className={cn(
-          BUTTON,
-          "w-full border border-ink-600 text-mist-200 hover:bg-ink-800",
-        )}
+        className={cn(BUTTON, "w-full border border-ink-600 text-mist-200 hover:bg-ink-800")}
       >
         Find contact details
       </button>

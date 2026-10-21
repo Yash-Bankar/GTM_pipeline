@@ -11,6 +11,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.campaigns.service import CampaignService
 from app.dashboard.service import DashboardService
 from app.db.database import get_db
 from app.db.repository import Repository
@@ -29,6 +30,10 @@ def get_dashboard_service(repo: Repository = Depends(get_repository)) -> Dashboa
     return DashboardService(repo)
 
 
+def get_campaign_service(repo: Repository = Depends(get_repository)) -> CampaignService:
+    return CampaignService(repo)
+
+
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     """Reject requests missing a valid `x-api-key` when API_KEY is configured."""
     expected = get_settings().api_key.strip()
@@ -40,6 +45,7 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 
 
 __all__ = [
+    "get_campaign_service",
     "get_dashboard_service",
     "get_db",
     "get_lead_service",

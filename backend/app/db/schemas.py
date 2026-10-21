@@ -14,10 +14,12 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from .util import normalize_username  # re-exported for callers
 
 __all__ = [
+    "Campaign",
     "CaptureReceipt",
     "ContactRequest",
     "Dossier",
     "EvidenceVersion",
+    "FitDecision",
     "Lead",
     "LeadPost",
     "OutreachEntry",
@@ -82,6 +84,9 @@ class Lead(RowModel):
     fit_status: str = "not_reviewed"
     fit_note: str = ""
     fit_decided_at: str = ""
+    decision_currency: str = "current"
+    decision_currency_reason: str = ""
+    new_evidence_available: bool = False
     created_at: str = ""
     updated_at: str = ""
 
@@ -252,4 +257,35 @@ class EvidenceVersion(RowModel):
     parser_version: str = ""
     field_provenance: str = ""
     changed_fields: str = ""
+    created_at: str = ""
+
+
+class Campaign(RowModel):
+    """A row in `campaigns`."""
+
+    campaign_id: str = ""
+    name: str = ""
+    description: str = ""
+    target_topics: str = ""  # JSON list
+    language: str = ""
+    follower_min: IntField = 0
+    follower_max: IntField = 0
+    version: IntField = 1
+    is_active: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class FitDecision(RowModel):
+    """A row in `fit_decisions` (append-only)."""
+
+    decision_id: str = ""
+    lead_id: str = ""
+    action: str = ""
+    fit_status: str = ""
+    decision_currency: str = "current"
+    evidence_version: IntField = 0
+    criteria_version: IntField = 0
+    note: str = ""
+    actor: str = ""
     created_at: str = ""

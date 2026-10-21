@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from app.db.repository import Repository
 
@@ -11,20 +11,20 @@ def _create_lead(api_client, username: str) -> str:
 
 def _approve(api_client, lead_id: str) -> None:
     response = api_client.patch(
-        f"/api/v1/leads/{lead_id}/fit", json={"action": "approve", "note": "Good fit"}
+        f"/api/v1/leads/{lead_id}/fit", json={"action": "shortlist", "note": "Good fit"}
     )
     assert response.status_code == 200
-    assert response.json()["fit_status"] == "approved"
+    assert response.json()["fit_status"] == "shortlisted"
 
 
 def test_approve_fit_records_status_note_and_timestamp(api_client) -> None:
     lead_id = _create_lead(api_client, "fit.approve")
     response = api_client.patch(
-        f"/api/v1/leads/{lead_id}/fit", json={"action": "approve", "note": "Strong finance fit"}
+        f"/api/v1/leads/{lead_id}/fit", json={"action": "shortlist", "note": "Strong finance fit"}
     )
     assert response.status_code == 200
     lead = response.json()
-    assert lead["fit_status"] == "approved"
+    assert lead["fit_status"] == "shortlisted"
     assert lead["fit_note"] == "Strong finance fit"
     assert lead["fit_decided_at"]
 
@@ -32,10 +32,10 @@ def test_approve_fit_records_status_note_and_timestamp(api_client) -> None:
 def test_need_evidence_sets_status(api_client) -> None:
     lead_id = _create_lead(api_client, "fit.more")
     response = api_client.patch(
-        f"/api/v1/leads/{lead_id}/fit", json={"action": "need_evidence"}
+        f"/api/v1/leads/{lead_id}/fit", json={"action": "research_more"}
     )
     assert response.status_code == 200
-    assert response.json()["fit_status"] == "needs_evidence"
+    assert response.json()["fit_status"] == "research_more"
 
 
 def test_reject_requires_a_note(api_client) -> None:
@@ -66,7 +66,7 @@ def test_fit_decision_invalid_action_is_422(api_client) -> None:
 
 def test_fit_decision_missing_lead_is_404(api_client) -> None:
     response = api_client.patch(
-        "/api/v1/leads/ld_nope/fit", json={"action": "approve"}
+        "/api/v1/leads/ld_nope/fit", json={"action": "shortlist"}
     )
     assert response.status_code == 404
 

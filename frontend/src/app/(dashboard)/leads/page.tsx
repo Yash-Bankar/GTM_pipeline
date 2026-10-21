@@ -90,7 +90,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
         />
         <StatCard
           label="Ready for review"
-          value={byProgress.ready ?? 0}
+          value={byProgress.complete ?? 0}
           hint="Research complete"
         />
         <StatCard label="Researching" value={researching} hint="Queued or running" />

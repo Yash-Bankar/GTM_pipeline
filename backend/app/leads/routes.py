@@ -9,6 +9,8 @@ from app.leads.schemas import (
     ContactRequestCreate,
     ContactRequestOut,
     DraftRequestCreate,
+    FitDecisionListOut,
+    FitDecisionOut,
     FitDecisionRequest,
     LeadCreateRequest,
     LeadListResponse,
@@ -159,8 +161,12 @@ def request_contact(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "FIT_APPROVAL_REQUIRED",
-                "message": "Approve fit before requesting contact details.",
+                "message": (
+                    "Shortlist this creator with current evidence before requesting "
+                    "contact details."
+                ),
                 "fit_status": exc.fit_status,
+                "decision_currency": exc.decision_currency,
             },
         ) from exc
     if request is None:
@@ -189,8 +195,12 @@ def request_draft(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "FIT_APPROVAL_REQUIRED",
-                "message": "Approve fit before requesting outreach drafts.",
+                "message": (
+                    "Shortlist this creator with current evidence before requesting "
+                    "an outreach draft."
+                ),
                 "fit_status": exc.fit_status,
+                "decision_currency": exc.decision_currency,
             },
         ) from exc
     if revision is None:
@@ -218,5 +228,26 @@ def list_draft_requests(
     rows = service.list_draft_revisions(lead_id)
     return OutreachRevisionListOut(
         items=[OutreachRevisionOut.from_model(row) for row in rows],
+        total=len(rows),
+    )
+
+
+@router.get(
+    "/leads/{lead_id}/fit-decisions",
+    response_model=FitDecisionListOut,
+    summary="List fit decision history (V2-03)",
+)
+def list_fit_decisions(
+    lead_id: str,
+    service: LeadService = Depends(get_lead_service),
+) -> FitDecisionListOut:
+    if service.get(lead_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    rows = service.list_fit_decisions(lead_id)
+    return FitDecisionListOut(
+        items=[FitDecisionOut.from_model(row) for row in rows],
         total=len(rows),
     )

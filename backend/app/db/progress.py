@@ -1,10 +1,10 @@
-"""Shared research-progress derivation (PRD §10, ticket T01).
+﻿"""Shared research-progress derivation (PRD section 10, tickets T01/V2-03).
 
-The displayed research state is derived from persisted jobs plus the lead — never
-from the raw ``lead.status`` alone — so a terminal job failure is shown as
+The displayed research state is derived from persisted jobs plus the lead, never
+from the raw ``lead.status`` alone, so a terminal job failure is shown as
 ``blocked`` instead of a misleading "Queued / Awaiting the worker".
 
-States: ``needs_data`` · ``queued`` · ``running`` · ``ready`` · ``blocked``.
+States: ``needs_data``, ``queued``, ``running``, ``complete``, ``blocked``.
 """
 
 from __future__ import annotations
@@ -26,13 +26,13 @@ def derive_research_status(lead_status: str, jobs: Iterable[PipelineJob]) -> str
     """Derive the effective research state for a lead.
 
     Precedence (a terminal error always wins over a queued label):
-    1. a required-stage terminal error → ``blocked``
-    2. any research job running → ``running``
-    3. any research job queued/retry → ``queued``
-    4. profile research succeeded → ``ready``
-    5. lead marked not_found/error → ``blocked``
-    6. an optional-stage error with no successful profile → ``blocked``
-    7. otherwise → ``needs_data``
+    1. a required-stage terminal error -> ``blocked``
+    2. any research job running -> ``running``
+    3. any research job queued/retry -> ``queued``
+    4. profile research succeeded -> ``complete``
+    5. lead marked not_found/error -> ``blocked``
+    6. an optional-stage error with no successful profile -> ``blocked``
+    7. otherwise -> ``needs_data``
     """
     research = _research_jobs(jobs)
     status_value = (lead_status or "").lower()
@@ -47,7 +47,7 @@ def derive_research_status(lead_status: str, jobs: Iterable[PipelineJob]) -> str
     if any(job.status in constants.JOB_ACTIVE_STATUSES for job in research):
         return constants.RESEARCH_QUEUED
     if status_value == constants.LEAD_STATUS_ENRICHED:
-        return constants.RESEARCH_READY
+        return constants.RESEARCH_COMPLETE
     if status_value in (constants.LEAD_STATUS_NOT_FOUND, constants.LEAD_STATUS_ERROR):
         return constants.RESEARCH_BLOCKED
     if any(job.status == constants.JOB_ERROR for job in research):
@@ -62,7 +62,7 @@ def research_remedy(lead_status: str, jobs: Iterable[PipelineJob]) -> str:
 
     if not errored:
         if (lead_status or "").lower() == constants.LEAD_STATUS_NOT_FOUND:
-            return "Profile not found on Instagram — verify the handle."
+            return "Profile not found on Instagram - verify the handle."
         return ""
 
     # Surface the most actionable error first (required stages before optional).
@@ -81,14 +81,14 @@ def _remedy_for(job: PipelineJob) -> str:
 
     if job.stage == constants.STAGE_PROFILE_FETCH:
         if any(marker in error for marker in ("auth", "401", "403", "rejected the api key")):
-            return "Profile source rejected credentials — check HIKERAPI_KEY in Settings."
+            return "Profile source rejected credentials - check HIKERAPI_KEY in Settings."
         if "not found" in error or "notfound" in error:
-            return "Profile not found on Instagram — verify the handle."
+            return "Profile not found on Instagram - verify the handle."
         if "quota" in error or "rate" in error:
-            return "Profile source rate-limited — retry later."
+            return "Profile source rate-limited - retry later."
         return f"Profile research failed: {job.last_error}"
     if job.stage == constants.STAGE_AI_DOSSIER:
-        return "AI generation failed — check GEMINI_API_KEY / GEMINI_MODEL, then retry."
+        return "AI generation failed - check GEMINI_API_KEY / GEMINI_MODEL, then retry."
     if job.stage == constants.STAGE_WEBSITE_ENRICH:
-        return "Website research failed — the profile may have no reachable public site."
+        return "Website research failed - the profile may have no reachable public site."
     return f"{job.stage} failed: {job.last_error}"

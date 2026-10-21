@@ -100,7 +100,9 @@ handle-only/HikerAPI leads) with `is_verified`, `external_urls`, the
 text are retained (blanket pre-shortlist masking withdrawn).
 
 Leads also expose `evidence_version` and `evidence_version_id` (the current
-pointer). Submission responses include `research_queued`.
+pointer), `research_status` (`needs_data`/`queued`/`running`/`complete`/`blocked`),
+`decision_currency` (`current`/`review_needed`), `decision_currency_reason`, and
+`new_evidence_available`. Submission responses include `research_queued`.
 
 ### `GET /api/v1/leads/{lead_id}/brief`
 
@@ -126,30 +128,49 @@ Response: `{ "items": [...], "total": 12, "limit": 50, "offset": 0 }`, newest fi
 
 Fetch one lead by its stable `leadId`. `404` if not found.
 
-### `PATCH /api/v1/leads/{lead_id}/fit` (T08)
+### `PATCH /api/v1/leads/{lead_id}/fit` (T08/V2-03)
 
 Record the operator's manual fit decision. Separate from research progress.
 
 ```json
-{ "action": "approve", "note": "Strong finance fit" }
+{ "action": "shortlist", "note": "Strong finance fit" }
 ```
 
-- `action`: `approve` | `reject` | `need_evidence`.
+- `action`: `shortlist` | `research_more` | `reject` | `reopen`.
+  The legacy aliases `approve` (→ shortlist) and `need_evidence` (→ research_more)
+  are accepted.
 - `note`: optional except for `reject`, which requires a non-empty note (`422`).
-- Stores `fit_status` (`approved`/`rejected`/`needs_evidence`), `fit_note`, and a
-  server `fit_decided_at` timestamp. Returns the updated lead; `404` if missing.
+- Stores `fit_status` (`not_reviewed`/`research_more`/`shortlisted`/`rejected`),
+  `fit_note`, `fit_decided_at`, and resets `decision_currency` to `current`.
+- A rejected creator must be `reopen`ed before another decision; `reopen` always
+  returns to `not_reviewed` and clears `new_evidence_available`.
+- Every decision writes a `fit_decisions` history row (action, evidence version,
+  criteria version, note, actor, timestamp).
 
-### `POST /api/v1/leads/{lead_id}/contact-requests` (T08)
+### `GET /api/v1/leads/{lead_id}/fit-decisions` (V2-03)
+
+List the append-only decision history for a lead, including system events
+(`review_needed`, `new_evidence`).
+
+### `GET /api/v1/campaign` and `PUT /api/v1/campaign` (V2-03)
+
+Read or replace the single active campaign: `name`, `description`,
+`target_topics`, `language`, `follower_min`, `follower_max`. `version` is 0 when
+unconfigured and increments on each `PUT`. Updating criteria marks current
+shortlists `review_needed`.
+
+### `POST /api/v1/leads/{lead_id}/contact-requests` (T08/V2-03)
 
 Queue an explicit request to find public contact details. **Requires
-`fit_status == "approved"`**; otherwise returns `403` with
-`{"code": "FIT_APPROVAL_REQUIRED", "fit_status": ...}`. Body is optional:
-`{ "note": "..." }`. Returns `201` with the stored request.
+`fit_status == "shortlisted"` AND `decision_currency == "current"`**; otherwise
+returns `403` with
+`{"code": "FIT_APPROVAL_REQUIRED", "fit_status": ..., "decision_currency": ...}`.
+Body is optional: `{ "note": "..." }`. Returns `201` with the stored request.
 
-### `POST /api/v1/leads/{lead_id}/draft-requests` (T08)
+### `POST /api/v1/leads/{lead_id}/draft-requests` (T08/V2-03)
 
-Request a new outreach draft revision. **Requires `fit_status == "approved"`**
-(else `403`). Body:
+Request a new outreach draft revision. **Requires a current shortlist** (else
+`403`). Body:
 
 ```json
 { "channel": "email" }

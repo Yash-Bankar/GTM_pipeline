@@ -3,7 +3,7 @@
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_PRD_v2_Creator_Review.md` (v2.0, 20 October 2026)
 **Report date:** 2026-10-19
-**Status:** V2-01 and V2-02 **Complete**. V2-03 through V2-09 are tracked but not started.
+**Status:** V2-01, V2-02, and V2-03 **Complete**. V2-04 through V2-09 are tracked but not started.
 
 ---
 
@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | **V2-01 Â· Stop unintended work** | Remove auto-outreach fan-out; guard disabled AI; withdraw blanket contact masking; preserve drafts | **COMPLETE** |
 | V2-02 Â· Evidence and scheduling | Durable receipts, immutable versions, safe merge, recapture processing, concurrency | **COMPLETE** |
-| V2-03 Â· Review and state | Separate research/fit, one campaign config, material-change rules, decision history | Not started |
+| V2-03 Â· Review and state | Separate research/fit, one campaign config, material-change rules, decision history | **COMPLETE** |
 | V2-04 Â· Brief and public contacts | Full non-AI evidence brief, incidental contact extraction/provenance, legacy migration | Not started (evidence-only brief foundation shipped in V2-01) |
 | V2-05 Â· Extension reliability | Capture preview, scoped key, 50-item queue, connection/retry outcomes | Not started |
 | V2-06 Â· Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | Not started |
@@ -201,7 +201,7 @@ Note: the backend suite lives in `tests/` (there is no `backend/tests/`); run
 
 ---
 
-## 3. V2-02 — Evidence and scheduling (Complete)
+## 3. V2-02 ï¿½ Evidence and scheduling (Complete)
 
 ### 3.1 Capture receipts
 
@@ -368,4 +368,219 @@ app/(dashboard)/dossiers/[leadId]/page.tsx  shows Evidence vN
 ```text
 docs/api.md       409 conflict, receipts/versions, evidence_version
 docs/database.md  new tables + lead evidence columns
+```
+
+---
+
+## 4. V2-03 — Review and state (Complete)
+
+### 4.1 State model
+
+| Dimension | Values | Notes |
+| --- | --- | --- |
+| `fit_status` | `not_reviewed`, `research_more`, `shortlisted`, `rejected` | Manual operator intent |
+| `decision_currency` | `current`, `review_needed` | Whether a shortlist still matches material evidence/criteria |
+| `research_status` (derived) | `needs_data`, `queued`, `running`, `complete`, `blocked` | Computed from jobs; `ready` renamed to `complete` |
+
+Pre-v2 action names are accepted as aliases (`approve` ? `shortlist`,
+`need_evidence` ? `research_more`) but storage always uses the v2 values. The
+migration maps existing `approved` ? `shortlisted` and `needs_evidence` ?
+`research_more`.
+
+### 4.2 Campaign configuration
+
+One active campaign: `name`, `description`, `target_topics`, optional
+`language`, `follower_min`, `follower_max`, and an incrementing `version`
+(0 = not configured).
+
+- `GET /api/v1/campaign` — current configuration (version 0 when absent).
+- `PUT /api/v1/campaign` — replace/increment the version.
+- Updating criteria marks every `shortlisted` decision with
+  `decision_currency=review_needed` and writes a system history event; this is
+  a deliberate deterministic invalidation, not AI judgment.
+
+### 4.3 Material-change policy (deterministic)
+
+When a creator is **shortlisted** and a newer capture is applied, the decision
+becomes `review_needed` only if one or more of these are true:
+
+1. **Bio changed** (normalized text differs).
+2. **External domain changed** (the set of domains in external links differs).
+3. **Follower count crossed the campaign threshold** (with a configured
+   `follower_min`/`follower_max`; unknown values never count as a crossing).
+
+Timestamp-only recaptures, display/precision-only changes, and identical evidence
+do **not** invalidate a shortlist. Stale evidence is retained as history but does
+not mutate the lead. A **rejected** creator receiving new evidence stays
+`rejected`, keeps `decision_currency=current`, and gains
+`new_evidence_available=true` (with a `new_evidence` history event); it cannot be
+contacted/drafted until explicitly reopened.
+
+### 4.4 Decision history
+
+`fit_decisions` is append-only and records every manual decision plus system
+events:
+
+| Column | Meaning |
+| --- | --- |
+| `decision_id` (PK) | `fd_<uuid hex>` |
+| `lead_id` | FK ? `leads` (cascade) |
+| `action` | `shortlist`, `research_more`, `reject`, `reopen`, `review_needed`, `new_evidence` |
+| `fit_status` | resulting status |
+| `decision_currency` | resulting currency |
+| `evidence_version` | lead's evidence version at the time |
+| `criteria_version` | active campaign version (0 when none) |
+| `note` | operator note or system reason |
+| `actor` | `shared dashboard operator` or `system` |
+| `created_at` | microsecond-precision timestamp for stable ordering |
+
+`GET /api/v1/leads/{lead_id}/fit-decisions` returns the history.
+
+Reopening is only valid from `rejected`, always returns the creator to
+`not_reviewed`, clears `new_evidence_available`, and never auto-shortlists.
+
+### 4.5 Gated actions
+
+Contact and draft requests require **`fit_status=shortlisted` AND
+`decision_currency=current`**. If review is needed, the API returns `403` with
+`{"code": "FIT_APPROVAL_REQUIRED", "fit_status": ..., "decision_currency":
+"review_needed"}` and the UI explains that fit must be reconfirmed.
+
+### 4.6 Exact database/schema changes
+
+Migration **`d4e5f6a7b8c9_review_state.py`** (down_revision `c3d4e5f6a7b8`):
+
+```text
+leads
+  + decision_currency        VARCHAR(32) NOT NULL DEFAULT 'current', indexed
+  + decision_currency_reason TEXT NOT NULL DEFAULT ''
+  + new_evidence_available   BOOLEAN NOT NULL DEFAULT false
+  (data) fit_status: 'approved' -> 'shortlisted', 'needs_evidence' -> 'research_more'
+
+campaigns (new)
+  campaign_id    VARCHAR(64) PK
+  name           VARCHAR(255) NOT NULL DEFAULT ''
+  description    TEXT NOT NULL DEFAULT ''
+  target_topics  TEXT NOT NULL DEFAULT ''        -- JSON list
+  language       VARCHAR(32) NOT NULL DEFAULT ''
+  follower_min   INTEGER NOT NULL DEFAULT 0
+  follower_max   INTEGER NOT NULL DEFAULT 0
+  version        INTEGER NOT NULL DEFAULT 1
+  is_active      BOOLEAN NOT NULL DEFAULT true, indexed
+  created_at, updated_at VARCHAR(40)
+
+fit_decisions (new)
+  decision_id       VARCHAR(64) PK
+  lead_id           VARCHAR(64) FK leads(lead_id) ON DELETE CASCADE, indexed
+  action            VARCHAR(32) NOT NULL DEFAULT ''
+  fit_status        VARCHAR(32) NOT NULL DEFAULT ''
+  decision_currency VARCHAR(32) NOT NULL DEFAULT 'current'
+  evidence_version  INTEGER NOT NULL DEFAULT 0
+  criteria_version  INTEGER NOT NULL DEFAULT 0
+  note              TEXT NOT NULL DEFAULT ''
+  actor             VARCHAR(64) NOT NULL DEFAULT ''
+  created_at        VARCHAR(40) NOT NULL DEFAULT '', indexed
+```
+
+Current migration head: **`d4e5f6a7b8c9`** (verified in PostgreSQL).
+
+### 4.7 API additions
+
+- `POST /api/v1/leads` responses expose `decision_currency`,
+  `decision_currency_reason`, `new_evidence_available`, and `research_status`.
+- `PATCH /api/v1/leads/{id}/fit` accepts `shortlist`, `research_more`, `reject`,
+  `reopen` (plus the legacy aliases). Reject requires a note; a rejected creator
+  must be reopened first.
+- `GET /api/v1/campaign` / `PUT /api/v1/campaign`.
+- `GET /api/v1/leads/{id}/fit-decisions`.
+- Research filters/counters use `complete` instead of `ready`.
+
+### 4.8 Frontend
+
+- Fit bar: **Shortlist**, **Research more**, **Reject**, and **Reopen for review**
+  (only when rejected).
+- Review-needed and new-evidence badges on the detail and leads table.
+- Contact/draft buttons are disabled until the shortlist is current, with the
+  reason shown.
+- Decision history card; campaign criterion version shown per event.
+- Research status enum updated to `complete`.
+
+### 4.9 Tests (V2-03)
+
+New `tests/test_review_state.py` (9 tests):
+
+1. `test_v13_research_more_reject_reopen_and_shortlist`
+2. `test_v13_legacy_action_aliases_still_work`
+3. `test_v14_bio_change_marks_review_needed_and_blocks_gates`
+4. `test_v14_external_domain_change_marks_review_needed`
+5. `test_v14_follower_threshold_crossing_marks_review_needed`
+6. `test_v15_timestamp_only_and_unchanged_recaptures_do_not_invalidate`
+7. `test_v16_rejected_creator_gains_new_evidence_flag_without_reopening`
+8. `test_campaign_configuration_roundtrip_and_invalidates_shortlists`
+9. `test_campaign_rejects_unknown_fields`
+
+Updated existing tests for the v2 vocabulary (`shortlist`/`research_more`;
+research `complete`).
+
+### 4.10 Verification
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Backend | `python -m pytest` | **246 passed** |
+| Frontend lint | `npm run lint` | clean |
+| Frontend typecheck | `npx tsc --noEmit` | clean |
+| Frontend build | `npm run build` | success |
+| Migration head | `alembic_version` | `d4e5f6a7b8c9` |
+| Live: shortlist + recapture | changed bio + follower crossing | `review_needed`, evidence v2, both reasons |
+| Live: gate | contact request while review needed | **403** with `decision_currency=review_needed` |
+| Live: history | after shortlist + invalidation | `shortlist`, `review_needed` |
+| Live: rejected + new evidence | recapture after reject | stays `rejected`, `new_evidence_available=true` |
+| Live: reopen | reopen | `not_reviewed`, flag cleared |
+| Live: campaign | GET/PUT | version 0 -> 1; invalidates current shortlists |
+
+### 4.11 Files changed
+
+**Backend**
+
+```text
+app/constants.py                     v2 fit/currency states + aliases; RESEARCH_COMPLETE
+app/db/progress.py                   returns "complete"
+app/db/models.py                     Lead currency/new-evidence; Campaign; FitDecision
+app/db/schemas.py                    matching row models + Lead fields
+app/db/repository.py                 bool field coercion; campaign; fit decisions
+app/db/util.py                       utc_now_iso_precise
+app/campaigns/{__init__,schemas,service,routes}.py   NEW
+app/dependencies.py                  get_campaign_service
+app/main.py                          campaign router
+app/leads/evidence.py                material_change_reasons + domain extraction
+app/leads/service.py                 transitions, history, invalidation, gates
+app/leads/schemas.py                 LeadResponse fields; FitDecision models; actions
+app/leads/routes.py                  gates + fit-decisions endpoint
+alembic/versions/d4e5f6a7b8c9_review_state.py
+tests/test_review_state.py           NEW (9 tests)
+tests/test_fit_gates.py              v2 actions/statuses
+tests/test_no_unintended_work.py     shortlist action
+tests/test_api_leads.py              status=complete
+```
+
+**Frontend**
+
+```text
+lib/types.ts                         currency/new-evidence/research fields, FitDecision
+lib/api.ts                           decideFit actions, listFitDecisions
+lib/format.ts                        complete/shortlisted/research_more/review_needed tones
+actions/fit.ts                       v2 actions/messages
+components/fit-decision.tsx          shortlist/research more/reject/reopen + indicators
+components/outreach-gates.tsx         shortlisted+current gate messaging
+components/ui.tsx                    finished status set
+components/lead-filters.tsx          complete option
+components/leads-table.tsx           review-needed/new-evidence badges
+app/(dashboard)/leads/page.tsx       complete counter
+app/(dashboard)/leads/[leadId]/page.tsx  fit props, gate reason, decision history
+```
+
+**Docs**
+
+```text
+docs/api.md, docs/database.md
 ```

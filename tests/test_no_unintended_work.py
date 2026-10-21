@@ -1,4 +1,4 @@
-"""V2-01: no unintended work.
+﻿"""V2-01: no unintended work.
 
 These tests prove that AI summary/dossier completion, the "retry AI" action, and
 shortlisting never schedule outreach/draft generation or contact discovery, and
@@ -85,11 +85,11 @@ def test_shortlist_does_not_schedule_contact_or_draft(api_client, repo: Reposito
     before = {job.job_id for job in repo.list_jobs(lead_id)}
 
     response = api_client.patch(
-        f"/api/v1/leads/{lead_id}/fit", json={"action": "approve", "note": "Good fit"}
+        f"/api/v1/leads/{lead_id}/fit", json={"action": "shortlist", "note": "Good fit"}
     )
 
     assert response.status_code == 200
-    assert response.json()["fit_status"] == "approved"
+    assert response.json()["fit_status"] == "shortlisted"
     # No new jobs, no discovery request, no draft revision.
     assert {job.job_id for job in repo.list_jobs(lead_id)} == before
     assert repo.list_contact_requests(lead_id) == []
@@ -118,7 +118,7 @@ def test_manual_workflow_works_with_ai_disabled(api_client, repo: Repository, mo
     try:
         lead_id = _create_lead(api_client, "v201.manual")
         approve = api_client.patch(
-            f"/api/v1/leads/{lead_id}/fit", json={"action": "approve", "note": "Manual"}
+            f"/api/v1/leads/{lead_id}/fit", json={"action": "shortlist", "note": "Manual"}
         )
         assert approve.status_code == 200
 

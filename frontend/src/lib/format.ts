@@ -58,7 +58,9 @@ export type Tone = "neutral" | "green" | "amber" | "red" | "blue" | "teal";
 
 export function statusTone(status: string): Tone {
   switch ((status || "").toLowerCase()) {
+    case "complete":
     case "ready":
+    case "shortlisted":
     case "done":
     case "enriched":
     case "approved":
@@ -70,6 +72,8 @@ export function statusTone(status: string): Tone {
     case "needs_review":
     case "needs_data":
     case "needs_evidence":
+    case "research_more":
+    case "review_needed":
       return "amber";
     case "error":
     case "blocked":
@@ -77,7 +81,6 @@ export function statusTone(status: string): Tone {
     case "rejected":
       return "red";
     case "queued":
-    case "review_needed":
       return "blue";
     case "none":
     case "new":

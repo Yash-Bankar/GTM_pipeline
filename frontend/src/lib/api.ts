@@ -11,6 +11,7 @@ import type {
   Brief,
   Dossier,
   DossierList,
+  FitDecisionList,
   IntegrationsStatus,
   Lead,
   LeadDetail,
@@ -90,7 +91,10 @@ export const api = {
 
   decideFit(
     leadId: string,
-    body: { action: "approve" | "reject" | "need_evidence"; note?: string },
+    body: {
+      action: "shortlist" | "research_more" | "reject" | "reopen";
+      note?: string;
+    },
   ) {
     return request<Lead>(`/api/v1/leads/${encodeURIComponent(leadId)}/fit`, {
       method: "PATCH",
@@ -115,6 +119,12 @@ export const api = {
   listDraftRevisions(leadId: string) {
     return request<OutreachRevisionList>(
       `/api/v1/leads/${encodeURIComponent(leadId)}/draft-requests`,
+    );
+  },
+
+  listFitDecisions(leadId: string) {
+    return request<FitDecisionList>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/fit-decisions`,
     );
   },
 
