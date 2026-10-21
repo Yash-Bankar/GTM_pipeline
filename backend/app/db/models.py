@@ -324,3 +324,22 @@ class FitDecision(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     actor: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[str] = mapped_column(String(40), default="", index=True)
+
+
+class Contact(Base):
+    """A publicly listed, evidence-backed contact (V2-04)."""
+
+    __tablename__ = "contacts"
+
+    contact_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    type: Mapped[str] = mapped_column(String(16), default="email", index=True)
+    value: Mapped[str] = mapped_column(String(512), default="")
+    source_url: Mapped[str] = mapped_column(String(1024), default="")
+    observed_at: Mapped[str] = mapped_column(String(40), default="")
+    method: Mapped[str] = mapped_column(String(32), default="")
+    validation_state: Mapped[str] = mapped_column(String(32), default="unverified")
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    updated_at: Mapped[str] = mapped_column(String(40), default="")

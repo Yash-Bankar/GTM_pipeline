@@ -3,7 +3,7 @@
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_PRD_v2_Creator_Review.md` (v2.0, 20 October 2026)
 **Report date:** 2026-10-19
-**Status:** V2-01, V2-02, and V2-03 **Complete**. V2-04 through V2-09 are tracked but not started.
+**Status:** V2-01, V2-02, V2-03, and V2-04 **Complete**. V2-05 through V2-09 are tracked but not started.
 
 ---
 
@@ -14,7 +14,7 @@
 | **V2-01 Â· Stop unintended work** | Remove auto-outreach fan-out; guard disabled AI; withdraw blanket contact masking; preserve drafts | **COMPLETE** |
 | V2-02 Â· Evidence and scheduling | Durable receipts, immutable versions, safe merge, recapture processing, concurrency | **COMPLETE** |
 | V2-03 Â· Review and state | Separate research/fit, one campaign config, material-change rules, decision history | **COMPLETE** |
-| V2-04 Â· Brief and public contacts | Full non-AI evidence brief, incidental contact extraction/provenance, legacy migration | Not started (evidence-only brief foundation shipped in V2-01) |
+| V2-04 Â· Brief and public contacts | Full non-AI evidence brief, incidental contact extraction/provenance, legacy migration | **COMPLETE** |
 | V2-05 Â· Extension reliability | Capture preview, scoped key, 50-item queue, connection/retry outcomes | Not started |
 | V2-06 Â· Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | Not started |
 | V2-07 Â· Drafts and manual history | Manual editor, optional generation, immutable versions, copy/export, sent/reply events | Not started |
@@ -372,7 +372,7 @@ docs/database.md  new tables + lead evidence columns
 
 ---
 
-## 4. V2-03 — Review and state (Complete)
+## 4. V2-03 ï¿½ Review and state (Complete)
 
 ### 4.1 State model
 
@@ -393,8 +393,8 @@ One active campaign: `name`, `description`, `target_topics`, optional
 `language`, `follower_min`, `follower_max`, and an incrementing `version`
 (0 = not configured).
 
-- `GET /api/v1/campaign` — current configuration (version 0 when absent).
-- `PUT /api/v1/campaign` — replace/increment the version.
+- `GET /api/v1/campaign` ï¿½ current configuration (version 0 when absent).
+- `PUT /api/v1/campaign` ï¿½ replace/increment the version.
 - Updating criteria marks every `shortlisted` decision with
   `decision_currency=review_needed` and writes a system history event; this is
   a deliberate deterministic invalidation, not AI judgment.
@@ -583,4 +583,148 @@ app/(dashboard)/leads/[leadId]/page.tsx  fit props, gate reason, decision histor
 
 ```text
 docs/api.md, docs/database.md
+```
+
+---
+
+## 5. V2-04 — Brief and public contacts (Complete)
+
+### 5.1 Non-AI creator brief
+
+`GET /api/v1/leads/{lead_id}/brief` now returns a structured Creator brief built
+entirely from parsed evidence — no AI provider, no dossier row required:
+
+- identity (`username`, `full_name`, verified flag, category),
+- bio and `observed_topics` (category plus campaign topics actually present in the
+  text; never invented),
+- counts with display/precision (`followers`, `following`, `post_count`),
+- `websites` (supplied external links plus observed crawled pages, with status),
+- `contacts` with provenance,
+- `missing_fields`, evidence version, and optional AI summary if one exists.
+
+The existing Dossier view falls back to this brief when no AI dossier exists.
+The brief is read-only and creates no work.
+
+### 5.2 Incidental contact extraction (worker)
+
+The website crawler now extracts publicly listed **emails and phone numbers** from
+each fetched page (existing limits: up to 5 pages, depth 2, 10 s/request).
+`WebsiteEnrichStage` stores every discovery as an evidence-backed row in the new
+`contacts` table:
+
+| Column | Meaning |
+| --- | --- |
+| `contact_id` (PK) | deterministic `ct_<sha1(lead|type|value|source)>` |
+| `lead_id` | FK ? `leads` (cascade) |
+| `type` | `email` / `phone` |
+| `value` | public value as observed |
+| `source_url` | page that exposed it |
+| `observed_at` | extraction time |
+| `method` | `website_crawl` (or `legacy`) |
+| `validation_state` | `unverified` (publicly listed, not verified) |
+
+Repeated crawls upsert by contact id (no duplicate rows). The crawler's aggregate
+email list is attributed to the first supplied URL when a page source is not
+available.
+
+**Visibility:** contacts are returned by `GET /api/v1/leads/{id}/contacts`, the
+`/detail` response, and the brief — for authenticated dashboard users, **with no
+shortlist/fit gate**.
+
+### 5.3 Legacy contact migration
+
+Existing public contact fields (`leads.business_email`,
+`leads.business_phone_number`) are backfilled by the migration into `contacts`
+with `method='legacy'`, empty `source_url`, and `observed_at` from the lead's
+timestamps. The API labels any contact without a source/method as
+**"Legacy source unknown"**; no source or validation claim is invented. The
+original legacy fields remain on the lead.
+
+### 5.4 Exact database/schema changes
+
+Migration **`e5f6a7b8c9d0_contacts.py`** (down_revision `d4e5f6a7b8c9`):
+
+```text
+contacts (new)
+  contact_id       VARCHAR(64) PK
+  lead_id          VARCHAR(64) FK leads(lead_id) ON DELETE CASCADE, indexed
+  type             VARCHAR(16) NOT NULL DEFAULT 'email', indexed
+  value            VARCHAR(512) NOT NULL DEFAULT ''
+  source_url       VARCHAR(1024) NOT NULL DEFAULT ''
+  observed_at      VARCHAR(40) NOT NULL DEFAULT ''
+  method           VARCHAR(32) NOT NULL DEFAULT ''
+  validation_state VARCHAR(32) NOT NULL DEFAULT 'unverified'
+  created_at, updated_at VARCHAR(40)
+
+(data) backfill from leads.business_email / leads.business_phone_number
+       with method='legacy', source_url='', deterministic contact_id (md5)
+```
+
+Current migration head: **`e5f6a7b8c9d0`** (verified in PostgreSQL; 4 legacy email
+contacts backfilled from existing data).
+
+### 5.5 Frontend
+
+- Lead detail shows a **Public contacts** card (value, type, provenance, source,
+  observed time) without any shortlist requirement.
+- The Creator brief view shows observed topics, linked websites, and contacts.
+- Legacy values render as **Legacy source unknown**.
+
+### 5.6 Tests (V2-04)
+
+New `tests/test_brief_contacts.py` (6 tests):
+
+1. `test_brief_renders_without_ai` — brief works with AI disabled; no dossier.
+2. `test_incidental_contacts_are_extracted_with_provenance` — email + phone from a
+   crawled page with source/time/method; visible immediately.
+3. `test_incidental_contacts_are_deduped_on_recrawl` — deterministic upsert.
+4. `test_legacy_contacts_are_labeled_source_unknown` — legacy label, original
+   fields preserved.
+5. `test_brief_includes_contacts_and_websites`.
+6. `test_phone_extraction_ignores_dates`.
+
+### 5.7 Verification
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Backend | `python -m pytest` | **252 passed** |
+| Frontend lint | `npm run lint` | clean |
+| Frontend typecheck | `npx tsc --noEmit` | clean |
+| Frontend build | `npm run build` | success |
+| Migration head | `alembic_version` | `e5f6a7b8c9d0` |
+| Live legacy backfill | `contacts` grouped by type/method | 4 `email`/`legacy` |
+| Live contacts API | `GET /leads/{id}/contacts` | `provenance="Legacy source unknown"` |
+| Live brief | `GET /leads/{id}/brief` | websites + contacts included |
+
+### 5.8 Files changed
+
+**Backend**
+
+```text
+app/db/models.py                     Contact table
+app/db/schemas.py                    Contact row model
+app/db/util.py                       deterministic contact_id
+app/db/repository.py                 upsert_contact / list_contacts
+app/providers/emails.py              extract_phones
+app/providers/website.py             FetchedPage.phones + extraction
+app/worker/pipeline.py               website stage stores evidence-backed contacts
+app/dashboard/schemas.py             ContactOut/ContactListOut; BriefOut/LeadDetailOut
+app/dashboard/service.py             contacts(), brief topics/websites/contacts
+app/dashboard/routes.py              contacts endpoint; detail contacts
+alembic/versions/e5f6a7b8c9d0_contacts.py
+tests/test_brief_contacts.py         NEW (6 tests)
+```
+
+**Frontend**
+
+```text
+lib/types.ts                         Contact + Brief fields + LeadDetail.contacts
+app/(dashboard)/leads/[leadId]/page.tsx          Public contacts card
+app/(dashboard)/dossiers/[leadId]/page.tsx       topics, linked websites, contacts
+```
+
+**Docs**
+
+```text
+docs/api.md, docs/database.md, docs/worker.md
 ```

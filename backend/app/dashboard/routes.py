@@ -8,6 +8,8 @@ from app import constants
 from app.config import get_settings
 from app.dashboard.schemas import (
     BriefOut,
+    ContactListOut,
+    ContactOut,
     DossierListOut,
     DossierOut,
     IntegrationsStatusOut,
@@ -51,6 +53,7 @@ def lead_detail(
         progress_remedy=detail.progress_remedy,
         posts=[PostOut.from_model(post) for post in detail.posts],
         website_pages=[WebsitePageOut.from_model(page) for page in detail.website_pages],
+        contacts=[ContactOut.from_model(contact) for contact in detail.contacts],
         jobs=[JobOut.from_model(job) for job in detail.jobs],
     )
 
@@ -217,3 +220,21 @@ def lead_brief(
             detail=f"No lead with leadId '{lead_id}'.",
         )
     return BriefOut(**brief)
+
+
+@router.get("/leads/{lead_id}/contacts", response_model=ContactListOut)
+def list_contacts(
+    lead_id: str,
+    service: DashboardService = Depends(get_dashboard_service),
+) -> ContactListOut:
+    """Publicly listed contacts, visible without a shortlist gate (V2-04)."""
+    contacts = service.contacts(lead_id)
+    if contacts is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lead with leadId '{lead_id}'.",
+        )
+    return ContactListOut(
+        items=[ContactOut.from_model(contact) for contact in contacts],
+        total=len(contacts),
+    )

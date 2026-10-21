@@ -30,6 +30,7 @@ function followerText(brief: Brief): string {
 }
 
 function BriefView({ brief }: { brief: Brief }) {
+  const websites = brief.websites.length > 0 ? brief.websites : brief.sources;
   return (
     <>
       <PageHeader
@@ -68,6 +69,18 @@ function BriefView({ brief }: { brief: Brief }) {
               <KeyValue label="Following">{formatNumber(brief.follows_count)}</KeyValue>
               <KeyValue label="Category">{brief.category || "—"}</KeyValue>
             </dl>
+            {brief.observed_topics.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 border-t border-ink-800 px-5 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-mist-400">
+                  Observed topics
+                </span>
+                {brief.observed_topics.map((topic) => (
+                  <Badge key={topic} tone="teal">
+                    {topic}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
             <div className="border-t border-ink-800 px-5 py-4">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-mist-400">
                 Bio
@@ -84,12 +97,12 @@ function BriefView({ brief }: { brief: Brief }) {
           </Card>
 
           <Card>
-            <CardHeader title="Website sources" subtitle={`${brief.sources.length} observed`} />
-            {brief.sources.length === 0 ? (
-              <EmptyState title="No website sources observed" />
+            <CardHeader title="Linked websites" subtitle={`${websites.length} observed`} />
+            {websites.length === 0 ? (
+              <EmptyState title="No linked websites observed" />
             ) : (
               <ul className="divide-y divide-ink-800">
-                {brief.sources.map((source) => (
+                {websites.map((source) => (
                   <li
                     key={source.url}
                     className="flex items-center justify-between gap-3 px-5 py-3"
@@ -113,6 +126,49 @@ function BriefView({ brief }: { brief: Brief }) {
                     >
                       {humanize(source.status)}
                     </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Public contacts" subtitle={`${brief.contacts.length} found`} />
+            {brief.contacts.length === 0 ? (
+              <EmptyState
+                title="No public contacts found"
+                description="No email or phone was observed in the captured profile or crawled pages."
+              />
+            ) : (
+              <ul className="divide-y divide-ink-800">
+                {brief.contacts.map((contact) => (
+                  <li key={contact.contact_id} className="px-5 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="break-all font-mono text-sm text-mist-100">
+                        {contact.value}
+                      </span>
+                      <Badge tone={contact.type === "email" ? "teal" : "neutral"}>
+                        {humanize(contact.type)}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-mist-400">
+                      {contact.provenance}
+                      {contact.source_url ? (
+                        <>
+                          {" · "}
+                          <a
+                            href={contact.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent-300 hover:underline"
+                          >
+                            {contact.source_url}
+                          </a>
+                        </>
+                      ) : null}
+                      {" · "}
+                      {formatDate(contact.observed_at)}
+                    </p>
                   </li>
                 ))}
               </ul>

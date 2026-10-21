@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
@@ -14,6 +15,12 @@ def new_lead_id(prefix: str = "ld") -> str:
 def new_job_id(prefix: str = "job") -> str:
     """Stable pipeline-job identifier (also the `pipeline_jobs.job_id` PK)."""
     return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def contact_id(lead_id: str, type: str, value: str, source_url: str = "") -> str:
+    """Deterministic contact id so repeated extraction upserts rather than duplicates."""
+    raw = f"{lead_id}|{type}|{value.strip().lower()}|{source_url.strip()}"
+    return f"ct_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:20]}"
 
 
 def utc_now_iso() -> str:

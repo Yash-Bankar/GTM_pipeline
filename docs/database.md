@@ -61,6 +61,14 @@ default.
 (`shared dashboard operator`/`system`), `created_at` (microsecond precision).
 Append-only history.
 
+### `contacts` (PK `contact_id`) — V2-04
+`lead_id` → `leads` (cascade), `type` (`email`/`phone`, indexed), `value`,
+`source_url`, `observed_at`, `method` (`website_crawl`/`legacy`),
+`validation_state` (`unverified`), timestamps. The id is deterministic over
+`(lead_id, type, value, source_url)`, so recrawls upsert. Legacy backfill rows
+have `method='legacy'` and an empty `source_url` (surfaced as
+**Legacy source unknown**).
+
 ### `lead_posts` (PK `post_id`)
 `lead_id` → `leads` (cascade), `username`, `username_normalized`, `media_type`,
 `product_type`, `short_code`, `url`, `caption`, `like_count`, `comment_count`,

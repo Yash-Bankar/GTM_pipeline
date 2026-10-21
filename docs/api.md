@@ -107,9 +107,19 @@ pointer), `research_status` (`needs_data`/`queued`/`running`/`complete`/`blocked
 ### `GET /api/v1/leads/{lead_id}/brief`
 
 Evidence-only creator brief. Works without AI and without a `dossiers` row
-(`has_dossier=false`, `ai_status="not_generated"`). Returns the bio, counts with
-precision, external URLs, missing fields, website sources, and any existing AI
-summary.
+(`has_dossier=false`, `ai_status="not_generated"`). Returns identity, bio,
+`observed_topics`, counts with precision, `external_urls`, `websites` (supplied
+links plus crawled pages), `missing_fields`, `contacts`, evidence version, and any
+existing AI summary.
+
+### `GET /api/v1/leads/{lead_id}/contacts`
+
+Publicly listed, evidence-backed contacts. Visible to authenticated dashboard
+users **without a shortlist gate**. Each item has `type` (`email`/`phone`),
+`value`, `source_url`, `observed_at`, `method`, `validation_state`, and a
+`provenance` label. Contacts discovered post-migration are `Public website`;
+contacts without provenance are `Legacy source unknown` (never an invented
+source).
 
 ### `GET /api/v1/leads`
 
@@ -208,7 +218,7 @@ List the outreach draft revision history for a lead, oldest first:
 
 ### `GET /api/v1/leads/{lead_id}/detail`
 
-Dashboard detail (lead, derived progress, posts, website pages, jobs).
+Dashboard detail (lead, derived progress, posts, website pages, contacts, jobs).
 
 ## Behavior
 

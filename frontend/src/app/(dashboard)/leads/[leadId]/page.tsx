@@ -72,7 +72,7 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
     decisions = [];
   }
 
-  const { lead, progress, progress_remedy: remedy, posts, website_pages: pages, jobs } = detail;
+  const { lead, progress, progress_remedy: remedy, posts, website_pages: pages, contacts, jobs } = detail;
   const snapshot = lead.snapshot;
   const links = splitUrls(lead.all_external_urls);
   const postsEmpty = postsEmptyCopy(lead.media_status);
@@ -236,6 +236,49 @@ export default async function LeadDetailPage({ params }: { params: Params }) {
                     ) : (
                       <p className="mt-1 line-clamp-2 text-xs text-mist-400">{page.text}</p>
                     )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Public contacts" subtitle={`${contacts.length} found`} />
+            {contacts.length === 0 ? (
+              <EmptyState
+                title="No public contacts found"
+                description="No email or phone was found in the captured bio or crawled pages."
+              />
+            ) : (
+              <ul className="divide-y divide-ink-800">
+                {contacts.map((contact) => (
+                  <li key={contact.contact_id} className="px-5 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="break-all font-mono text-sm text-mist-100">
+                        {contact.value}
+                      </span>
+                      <Badge tone={contact.type === "email" ? "teal" : "neutral"}>
+                        {humanize(contact.type)}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-mist-400">
+                      {contact.provenance}
+                      {contact.source_url ? (
+                        <>
+                          {" · "}
+                          <a
+                            href={contact.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent-300 hover:underline"
+                          >
+                            {contact.source_url}
+                          </a>
+                        </>
+                      ) : null}
+                      {" · "}
+                      {formatDate(contact.observed_at)}
+                    </p>
                   </li>
                 ))}
               </ul>

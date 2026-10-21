@@ -16,6 +16,7 @@ from .util import normalize_username  # re-exported for callers
 __all__ = [
     "Campaign",
     "CaptureReceipt",
+    "Contact",
     "ContactRequest",
     "Dossier",
     "EvidenceVersion",
@@ -289,3 +290,18 @@ class FitDecision(RowModel):
     note: str = ""
     actor: str = ""
     created_at: str = ""
+
+
+class Contact(RowModel):
+    """A row in `contacts`."""
+
+    contact_id: str = ""
+    lead_id: str = ""
+    type: str = "email"
+    value: str = ""
+    source_url: str = ""
+    observed_at: str = ""
+    method: str = ""
+    validation_state: str = "unverified"
+    created_at: str = ""
+    updated_at: str = ""

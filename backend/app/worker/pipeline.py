@@ -17,8 +17,8 @@ from app import constants
 from app.ai import AIService, Evidence, build_evidence
 from app.ai.service import DossierResult
 from app.db.repository import Repository
-from app.db.schemas import Dossier, Lead, LeadPost, OutreachEntry, PipelineJob, WebsitePage
-from app.db.util import utc_now_iso
+from app.db.schemas import Contact, Dossier, Lead, LeadPost, OutreachEntry, PipelineJob, WebsitePage
+from app.db.util import contact_id, utc_now_iso
 from app.leads.validation import InvalidLeadInput
 from app.worker.snapshot import parse_snapshot, snapshot_has_data, snapshot_to_lead_fields
 from app.providers.errors import (
@@ -422,6 +422,7 @@ class WebsiteEnrichStage:
         pages, emails = self._crawler.crawl(urls)
         now = utc_now_iso()
         done = blocked = errored = 0
+        stored_emails: set[str] = set()
 
         for page in pages:
             page_id = _page_id(job.lead_id, page.url)
@@ -446,12 +447,24 @@ class WebsiteEnrichStage:
                     updated_at=now,
                 )
             )
+            stored_emails.update(email.lower() for email in page.emails)
+            self._store_page_contacts(
+                repo, job.lead_id, page.emails, page.phones, page.resolved_url or page.url, now
+            )
             if page.status == "done":
                 done += 1
             elif page.status == "blocked":
                 blocked += 1
             else:
                 errored += 1
+
+        # The crawler also returns an aggregate email list (some providers only
+        # expose it there). Attribute those to the first supplied URL.
+        fallback_source = urls[0] if urls else ""
+        for email in emails:
+            if email.lower() in stored_emails:
+                continue
+            self._store_contact(repo, job.lead_id, "email", email, fallback_source, now)
 
         if done and (blocked or errored):
             status = constants.STAGE_STATUS_PARTIAL
@@ -467,6 +480,45 @@ class WebsiteEnrichStage:
             result=json.dumps(
                 {"pages": len(pages), "done": done, "blocked": blocked, "error": errored, "emails": len(emails)}
             ),
+        )
+
+    def _store_page_contacts(
+        self,
+        repo: Repository,
+        lead_id: str,
+        emails: list[str],
+        phones: list[str],
+        source_url: str,
+        observed_at: str,
+    ) -> None:
+        for email in emails or []:
+            self._store_contact(repo, lead_id, "email", email, source_url, observed_at)
+        for phone in phones or []:
+            self._store_contact(repo, lead_id, "phone", phone, source_url, observed_at)
+
+    @staticmethod
+    def _store_contact(
+        repo: Repository,
+        lead_id: str,
+        kind: str,
+        value: str,
+        source_url: str,
+        observed_at: str,
+    ) -> None:
+        text = str(value or "").strip()
+        if not text:
+            return
+        repo.upsert_contact(
+            Contact(
+                contact_id=contact_id(lead_id, kind, text, source_url),
+                lead_id=lead_id,
+                type=kind,
+                value=text,
+                source_url=source_url,
+                observed_at=observed_at,
+                method="website_crawl",
+                validation_state="unverified",
+            )
         )
 
 

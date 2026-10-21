@@ -28,6 +28,9 @@ from .models import (
     ContactRequest as ContactRequestORM,
 )
 from .models import (
+    Contact as ContactORM,
+)
+from .models import (
     Dossier as DossierORM,
 )
 from .models import (
@@ -61,6 +64,7 @@ from .progress import derive_research_status, research_remedy
 from .schemas import (
     Campaign,
     CaptureReceipt,
+    Contact,
     ContactRequest,
     Dossier,
     EvidenceVersion,
@@ -482,6 +486,31 @@ class Repository:
             select(LeadORM).where(LeadORM.fit_status == constants.FIT_STATUS_SHORTLISTED)
         ).all()
         return [Lead.model_validate(row) for row in rows]
+
+    # -- evidence-backed public contacts (V2-04) ---------------------------
+
+    def upsert_contact(self, contact: Contact) -> Contact:
+        now = utc_now_iso()
+        data = contact.model_dump()
+        data["created_at"] = data.get("created_at") or now
+        data["updated_at"] = now
+        row = self.session.get(ContactORM, contact.contact_id)
+        if row is None:
+            row = ContactORM(**data)
+            self.session.add(row)
+        else:
+            for key, value in data.items():
+                setattr(row, key, value)
+        self.session.commit()
+        return Contact.model_validate(row)
+
+    def list_contacts(self, lead_id: str) -> list[Contact]:
+        rows = self.session.scalars(
+            select(ContactORM)
+            .where(ContactORM.lead_id == lead_id)
+            .order_by(ContactORM.type, ContactORM.value)
+        ).all()
+        return [Contact.model_validate(row) for row in rows]
 
     def create_contact_request(self, request: ContactRequest) -> ContactRequest:
         now = utc_now_iso()

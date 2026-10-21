@@ -173,12 +173,42 @@ class OutreachOut(BaseModel):
         )
 
 
+class ContactOut(BaseModel):
+    """A publicly listed, evidence-backed contact (V2-04)."""
+
+    contact_id: str
+    lead_id: str
+    type: str
+    value: str
+    source_url: str
+    observed_at: str
+    method: str
+    validation_state: str
+    provenance: str = ""
+
+    @classmethod
+    def from_model(cls, contact) -> "ContactOut":
+        legacy = contact.method == "legacy" or not (contact.source_url or "").strip()
+        return cls(
+            contact_id=contact.contact_id,
+            lead_id=contact.lead_id,
+            type=contact.type,
+            value=contact.value,
+            source_url=contact.source_url,
+            observed_at=contact.observed_at,
+            method=contact.method,
+            validation_state=contact.validation_state,
+            provenance="Legacy source unknown" if legacy else "Public website",
+        )
+
+
 class LeadDetailOut(BaseModel):
     lead: LeadResponse
     progress: str = "needs_data"
     progress_remedy: str = ""
     posts: list[PostOut] = Field(default_factory=list)
     website_pages: list[WebsitePageOut] = Field(default_factory=list)
+    contacts: list[ContactOut] = Field(default_factory=list)
     jobs: list[JobOut] = Field(default_factory=list)
 
 
@@ -255,10 +285,18 @@ class BriefOut(BaseModel):
     captured_at: str = ""
     missing_fields: list[str] = Field(default_factory=list)
     is_verified: bool = False
+    observed_topics: list[str] = Field(default_factory=list)
+    websites: list[BriefSourceOut] = Field(default_factory=list)
     sources: list[BriefSourceOut] = Field(default_factory=list)
+    contacts: list[ContactOut] = Field(default_factory=list)
     evidence_version: int = 0
     has_dossier: bool = False
     ai_summary: str = ""
     ai_status: str = "not_generated"
     generated_at: str = ""
     model: str = ""
+
+
+class ContactListOut(BaseModel):
+    items: list[ContactOut]
+    total: int

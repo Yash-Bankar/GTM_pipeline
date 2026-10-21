@@ -20,7 +20,7 @@ backend/app/worker/
 | --- | --- | --- | --- |
 | `profile_fetch` | Snapshot → lead fields (else HikerAPI when configured); enqueues follow-ups | `leads` | `lead_id` |
 | `profile_media` | bounded recent posts/reels | `lead_posts`, lead `media_status` | `post_id` |
-| `website_enrich` | SSRF-safe crawl of external links | `website_pages`, lead `website_status` | `page_id` |
+| `website_enrich` | SSRF-safe crawl of external links; extracts public emails/phones | `website_pages`, `contacts`, lead `website_status` | `page_id` |
 | `ai_dossier` | Gemini creator brief/dossier + qualification score | `dossiers` | `lead_id` |
 | `ai_outreach` | Gemini email/DM drafts (`NEEDS_REVIEW`), only when explicitly queued | `outreach_drafts` | `lead_id` |
 
@@ -41,6 +41,13 @@ backend/app/worker/
 `profile_media`/`website_enrich` need no HikerAPI data: website research uses the
 snapshot's external URLs, and media is explicitly skipped (`media_status=none`)
 when no Instagram id is known.
+
+Public emails and phone numbers found on crawled pages are stored in `contacts`
+with `type`, `value`, `source_url`, `observed_at`, and `method="website_crawl"`
+(V2-04). They are visible to authenticated dashboard users immediately and do not
+require a shortlist/fit gate. Recrawls upsert by a deterministic contact id.
+Legacy `business_email`/`business_phone_number` rows are backfilled with
+`method="legacy"` and labeled "Legacy source unknown".
 
 `profile_fetch` enqueues `profile_media` (when an Instagram id is known) and
 `website_enrich` (when the profile has links). The media/website stages are

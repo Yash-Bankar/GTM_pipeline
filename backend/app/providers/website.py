@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 
 from app.common.retry import call_with_retry
 
-from .emails import extract_emails
+from .emails import extract_emails, extract_phones
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,7 @@ class FetchedPage:
     text: str = ""
     links: list[dict] = field(default_factory=list)
     emails: list[str] = field(default_factory=list)
+    phones: list[str] = field(default_factory=list)
     http_status: int = 0
     status: str = "done"  # done | error | blocked
     error: str = ""
@@ -431,6 +432,7 @@ class WebsiteCrawler:
                 text=text,
                 links=links,
                 emails=extract_emails(html + " " + text),
+                phones=extract_phones(html + " " + text),
                 http_status=status,
                 status="done",
             )

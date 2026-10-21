@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.db.repository import Repository
 from app.leads.schemas import parse_snapshot_out
 from app.db.schemas import (
+    Contact,
     Dossier,
     Lead,
     LeadPost,
@@ -35,6 +36,7 @@ class LeadDetail:
     progress_remedy: str = ""
     posts: list[LeadPost] = field(default_factory=list)
     website_pages: list[WebsitePage] = field(default_factory=list)
+    contacts: list[Contact] = field(default_factory=list)
     jobs: list[PipelineJob] = field(default_factory=list)
 
 
@@ -55,8 +57,15 @@ class DashboardService:
             progress_remedy=remedy,
             posts=self._repo.list_posts(lead_id),
             website_pages=self._repo.list_website_pages(lead_id),
+            contacts=self._repo.list_contacts(lead_id),
             jobs=self._repo.list_jobs(lead_id),
         )
+
+    def contacts(self, lead_id: str) -> list[Contact] | None:
+        """Public contacts for a lead; available without any fit gate (V2-04)."""
+        if self._repo.get_lead(lead_id) is None:
+            return None
+        return self._repo.list_contacts(lead_id)
 
     def lead_brief(self, lead_id: str) -> dict[str, object] | None:
         """Evidence-only creator brief. Never calls AI or a provider (V2-01)."""
@@ -75,6 +84,29 @@ class DashboardService:
                 if value and value not in urls:
                     urls.append(value)
 
+        campaign = self._repo.get_active_campaign()
+        category = (lead.business_category_name or "").strip()
+        observed_topics: list[str] = []
+        seen_topics: set[str] = set()
+        if category:
+            observed_topics.append(category)
+            seen_topics.add(category.lower())
+        if campaign is not None:
+            try:
+                target_topics = (
+                    json.loads(campaign.target_topics) if campaign.target_topics else []
+                )
+            except ValueError:
+                target_topics = []
+            haystack = f"{lead.bio} {category}".lower()
+            for topic in target_topics:
+                value = str(topic).strip()
+                if value and value.lower() in haystack and value.lower() not in seen_topics:
+                    observed_topics.append(value)
+                    seen_topics.add(value.lower())
+
+        contacts = self._repo.list_contacts(lead_id)
+
         return {
             "lead_id": lead.lead_id,
             "username": lead.username,
@@ -91,6 +123,9 @@ class DashboardService:
             "captured_at": lead.scraped_at,
             "missing_fields": snapshot.missing_fields if snapshot else [],
             "is_verified": snapshot.is_verified if snapshot else False,
+            "observed_topics": observed_topics,
+            "websites": _brief_websites(urls, pages),
+            "contacts": [_contact_payload(contact) for contact in contacts],
             "evidence_version": lead.evidence_version,
             "sources": [
                 {
@@ -262,3 +297,49 @@ def _worker_state(beat_at: str) -> str:
     if age < 0:
         age = 0
     return "active" if age <= constants.WORKER_STALE_SECONDS else "stale"
+
+
+def _brief_websites(urls: list[str], pages: list[WebsitePage]) -> list[dict[str, str]]:
+    """Combine supplied links with observed crawled pages (no invented URLs)."""
+    page_by_url = {page.url: page for page in pages}
+    websites: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for url in urls:
+        page = page_by_url.get(url)
+        websites.append(
+            {
+                "url": (page.resolved_url or url) if page is not None else url,
+                "title": page.title if page is not None else "",
+                "status": page.status if page is not None else "not_crawled",
+                "fetched_at": page.fetched_at if page is not None else "",
+            }
+        )
+        seen.add(url)
+    for page in pages:
+        if page.url in seen:
+            continue
+        websites.append(
+            {
+                "url": page.resolved_url or page.url,
+                "title": page.title,
+                "status": page.status,
+                "fetched_at": page.fetched_at,
+            }
+        )
+        seen.add(page.url)
+    return websites
+
+
+def _contact_payload(contact: Contact) -> dict[str, str]:
+    legacy = contact.method == "legacy" or not (contact.source_url or "").strip()
+    return {
+        "contact_id": contact.contact_id,
+        "lead_id": contact.lead_id,
+        "type": contact.type,
+        "value": contact.value,
+        "source_url": contact.source_url,
+        "observed_at": contact.observed_at,
+        "method": contact.method,
+        "validation_state": contact.validation_state,
+        "provenance": "Legacy source unknown" if legacy else "Public website",
+    }

@@ -114,6 +114,7 @@ export interface LeadDetail {
   progress_remedy: string;
   posts: Post[];
   website_pages: WebsitePage[];
+  contacts: Contact[];
   jobs: Job[];
 }
 
@@ -207,6 +208,18 @@ export interface BriefSource {
   fetched_at: string;
 }
 
+export interface Contact {
+  contact_id: string;
+  lead_id: string;
+  type: string;
+  value: string;
+  source_url: string;
+  observed_at: string;
+  method: string;
+  validation_state: string;
+  provenance: string;
+}
+
 export interface Brief {
   lead_id: string;
   username: string;
@@ -221,6 +234,9 @@ export interface Brief {
   captured_at: string;
   missing_fields: string[];
   is_verified: boolean;
+  observed_topics: string[];
+  websites: BriefSource[];
+  contacts: Contact[];
   evidence_version: number;
   sources: BriefSource[];
   has_dossier: boolean;
