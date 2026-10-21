@@ -560,9 +560,113 @@
     return summary;
   }
 
+  // -- pending capture queue (V2-05) ---------------------------------------
+
+  const QUEUE_LIMIT = 50;
+
+  function queueItemId(item) {
+    if (!item) return "";
+    return String(item.requestId || item.id || "").trim();
+  }
+
+  function normalizeQueue(queue) {
+    return Array.isArray(queue)
+      ? queue.filter((item) => item && queueItemId(item))
+      : [];
+  }
+
+  function pendingCount(queue) {
+    return normalizeQueue(queue).length;
+  }
+
+  function isQueueFull(queue, limit = QUEUE_LIMIT) {
+    return pendingCount(queue) >= limit;
+  }
+
+  function queueCapacityMessage(limit = QUEUE_LIMIT) {
+    return `Pending saves are full (${limit}/${limit}). Retry or discard an item before capturing more.`;
+  }
+
+  /**
+   * Add a pending capture. Returns `{ queue, accepted, reason }`.
+   * `reason` is `added`, `updated`, `invalid`, or `queue_full`. An existing
+   * request id is updated in place (retries keep the original id).
+   */
+  function enqueueCapture(queue, item, limit = QUEUE_LIMIT) {
+    const items = normalizeQueue(queue);
+    const requestId = queueItemId(item);
+    if (!requestId) return { queue: items, accepted: false, reason: "invalid" };
+
+    const index = items.findIndex((entry) => queueItemId(entry) === requestId);
+    if (index >= 0) {
+      const next = items.slice();
+      next[index] = { ...items[index], ...item };
+      return { queue: next, accepted: true, reason: "updated" };
+    }
+    if (items.length >= limit) {
+      return { queue: items, accepted: false, reason: "queue_full" };
+    }
+    return { queue: [...items, item], accepted: true, reason: "added" };
+  }
+
+  function removeCapture(queue, requestId) {
+    const target = String(requestId || "");
+    return normalizeQueue(queue).filter((item) => queueItemId(item) !== target);
+  }
+
+  function markCapture(queue, requestId, updates) {
+    const target = String(requestId || "");
+    return normalizeQueue(queue).map((item) =>
+      queueItemId(item) === target ? { ...item, ...(updates || {}) } : item,
+    );
+  }
+
+  /** Successful terminal outcomes remove a pending item; failures retain it. */
+  function isAcknowledgedSave(state) {
+    return state === "created" || state === "duplicate" || state === "updated";
+  }
+
+  /** Build the exact retry payload, reusing the original request id. */
+  function retryPayload(item) {
+    return {
+      username: (item && item.username) || "",
+      requestId: queueItemId(item),
+      snapshot: (item && item.snapshot) || null,
+    };
+  }
+
+  /**
+   * Classify an authenticated connection check. `result` is
+   * `{ status?: number, error?: boolean }`. Auth failures are distinct from an
+   * unreachable backend.
+   */
+  function classifyConnection(result) {
+    const value = result || {};
+    const status = Number(value.status || 0);
+    if (value.error || status === 0) {
+      return {
+        ok: false,
+        state: "network",
+        message: "Cannot reach the backend. Check the URL and network.",
+      };
+    }
+    if (status === 401 || status === 403) {
+      return {
+        ok: false,
+        state: "auth",
+        message: "Capture key rejected. Check the key and try again.",
+      };
+    }
+    if (status >= 200 && status < 300) {
+      return { ok: true, state: "connected", message: "Connected." };
+    }
+    return { ok: false, state: "error", message: `Backend returned ${status}.` };
+  }
+
   return {
     DEFAULT_API_BASE,
     PARSER_VERSION,
+    QUEUE_LIMIT,
     BLOCKED_SEGMENTS,
     CARD_MIN_WIDTH,
     CARD_MAX_WIDTH,
@@ -570,20 +674,30 @@
     associateSuggestedAccounts,
     buildLeadPayload,
     buildSnapshot,
+    classifyConnection,
     classifyResponse,
     cleanExternalUrl,
+    enqueueCapture,
     extractHandle,
     filterBioLines,
+    isAcknowledgedSave,
+    isQueueFull,
     isStatLine,
     isStatString,
     isVerifiedMarkup,
     isVerifiedText,
     makeRequestId,
+    markCapture,
     normalizeApiBase,
     normalizeExternalUrls,
+    normalizeQueue,
     parseCompactCount,
     parseProfileHtml,
+    pendingCount,
     pickDisplayName,
+    queueCapacityMessage,
+    removeCapture,
+    retryPayload,
     runBulkSubmit,
     submitLead,
   };

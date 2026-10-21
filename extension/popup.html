@@ -21,20 +21,34 @@
 
       <button id="addButton" type="button">Add to pipeline</button>
       <button id="addAllButton" type="button" class="secondary" hidden>Add All Verified</button>
-      <button id="retryButton" type="button" class="secondary" hidden>Retry unsaved</button>
+      <button id="retryButton" type="button" class="secondary" hidden>Retry all pending</button>
 
       <p id="status" class="status">Open an Instagram profile page.</p>
       <p id="batchResult" class="status" hidden></p>
 
+      <section id="queueSection" class="queue" hidden>
+        <div class="queue-head">
+          <span class="muted">Pending saves</span>
+          <span id="queueCount" class="muted">0/50</span>
+        </div>
+        <ul id="queueList" class="queue-list"></ul>
+        <p id="queueNote" class="status warn" hidden></p>
+      </section>
+
       <details>
         <summary>Settings</summary>
-        <label for="apiBaseUrl">API base URL</label>
+        <p id="backendLabel" class="muted">Backend: —</p>
+        <label for="apiBaseUrl">Backend URL</label>
         <input id="apiBaseUrl" type="text" spellcheck="false" placeholder="http://127.0.0.1:8000" />
-        <label for="apiKey">API key <span class="muted">(x-api-key, optional)</span></label>
+        <label for="apiKey">Capture key <span class="muted">(x-api-key, optional)</span></label>
         <input id="apiKey" type="password" spellcheck="false" placeholder="optional" />
         <button id="saveSettings" type="button" class="secondary">Save settings</button>
-        <button id="checkConnection" type="button" class="secondary">Check connection</button>
-        <p class="muted">Stored locally in this browser. The API key is never sent anywhere except your backend.</p>
+        <button id="checkConnection" type="button" class="secondary">Test connection</button>
+        <p id="connectionResult" class="status" hidden></p>
+        <p class="muted">
+          Stored locally in this browser. The capture key is never the dashboard password
+          or a HikerAPI/Gemini key.
+        </p>
       </details>
     </main>
     <script src="lib.js"></script>

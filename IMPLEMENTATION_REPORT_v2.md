@@ -3,7 +3,7 @@
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_PRD_v2_Creator_Review.md` (v2.0, 20 October 2026)
 **Report date:** 2026-10-19
-**Status:** V2-01, V2-02, V2-03, and V2-04 **Complete**. V2-05 through V2-09 are tracked but not started.
+**Status:** V2-01, V2-02, V2-03, V2-04, and V2-05 **Complete**. V2-06 through V2-09 are tracked but not started.
 
 ---
 
@@ -15,7 +15,7 @@
 | V2-02 Â· Evidence and scheduling | Durable receipts, immutable versions, safe merge, recapture processing, concurrency | **COMPLETE** |
 | V2-03 Â· Review and state | Separate research/fit, one campaign config, material-change rules, decision history | **COMPLETE** |
 | V2-04 Â· Brief and public contacts | Full non-AI evidence brief, incidental contact extraction/provenance, legacy migration | **COMPLETE** |
-| V2-05 Â· Extension reliability | Capture preview, scoped key, 50-item queue, connection/retry outcomes | Not started |
+| V2-05 Â· Extension reliability | Capture preview, scoped key, 50-item queue, connection/retry outcomes | **COMPLETE** |
 | V2-06 Â· Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | Not started |
 | V2-07 Â· Drafts and manual history | Manual editor, optional generation, immutable versions, copy/export, sent/reply events | Not started |
 | V2-08 Â· Review workspace UX | Creators views/detail, contextual actions, live progress, responsive forms | Not started |
@@ -587,12 +587,12 @@ docs/api.md, docs/database.md
 
 ---
 
-## 5. V2-04 — Brief and public contacts (Complete)
+## 5. V2-04 ï¿½ Brief and public contacts (Complete)
 
 ### 5.1 Non-AI creator brief
 
 `GET /api/v1/leads/{lead_id}/brief` now returns a structured Creator brief built
-entirely from parsed evidence — no AI provider, no dossier row required:
+entirely from parsed evidence ï¿½ no AI provider, no dossier row required:
 
 - identity (`username`, `full_name`, verified flag, category),
 - bio and `observed_topics` (category plus campaign topics actually present in the
@@ -628,7 +628,7 @@ email list is attributed to the first supplied URL when a page source is not
 available.
 
 **Visibility:** contacts are returned by `GET /api/v1/leads/{id}/contacts`, the
-`/detail` response, and the brief — for authenticated dashboard users, **with no
+`/detail` response, and the brief ï¿½ for authenticated dashboard users, **with no
 shortlist/fit gate**.
 
 ### 5.3 Legacy contact migration
@@ -674,11 +674,11 @@ contacts backfilled from existing data).
 
 New `tests/test_brief_contacts.py` (6 tests):
 
-1. `test_brief_renders_without_ai` — brief works with AI disabled; no dossier.
-2. `test_incidental_contacts_are_extracted_with_provenance` — email + phone from a
+1. `test_brief_renders_without_ai` ï¿½ brief works with AI disabled; no dossier.
+2. `test_incidental_contacts_are_extracted_with_provenance` ï¿½ email + phone from a
    crawled page with source/time/method; visible immediately.
-3. `test_incidental_contacts_are_deduped_on_recrawl` — deterministic upsert.
-4. `test_legacy_contacts_are_labeled_source_unknown` — legacy label, original
+3. `test_incidental_contacts_are_deduped_on_recrawl` ï¿½ deterministic upsert.
+4. `test_legacy_contacts_are_labeled_source_unknown` ï¿½ legacy label, original
    fields preserved.
 5. `test_brief_includes_contacts_and_websites`.
 6. `test_phone_extraction_ignores_dates`.
@@ -727,4 +727,97 @@ app/(dashboard)/dossiers/[leadId]/page.tsx       topics, linked websites, contac
 
 ```text
 docs/api.md, docs/database.md, docs/worker.md
+```
+
+---
+
+## 6. V2-05 — Extension reliability (Complete)
+
+### 6.1 Capture preview and payload
+
+- The extension still captures **only profile-scoped fields** from the open
+  profile: handle, display name, verified flag, bio, visible external links, and
+  follower/following/post counts. It never reads cookies, session tokens, raw
+  HTML, suggested accounts, hidden contact controls, or private content.
+- The popup renders a preview before saving: verified status, display name,
+  followers/following/posts with precision, bio excerpt, link count/first link,
+  and an explicit `Missing: ...` line.
+- A unit test asserts the snapshot's exact key set and that no session/cookie
+  fields can be present.
+
+### 6.2 Pending queue (50 max)
+
+- Replaced the single pending capture / batch list with one unified
+  `captureQueue` in `chrome.storage.local`.
+- Queue rules (pure helpers in `lib.js`, unit-tested):
+  - capacity **50**; the 51st capture is rejected with `reason="queue_full"` and
+    the popup explains: "Pending saves are full (50/50). Retry or discard an item
+    before capturing more."
+  - an item leaves the queue **only** after a successful server acknowledgement
+    (`created`/`duplicate`/`updated`) or an explicit **Discard**;
+  - failures (network/auth/config/invalid/error) remain queued;
+  - retries reuse the **original request id** (`retryPayload`);
+  - enqueueing an existing request id updates it in place (no duplicates).
+- Popup UI: a pending-saves list with count (`N/50`), per-item **Retry** and
+  **Discard**, plus **Retry all pending**. The queue persists across popup
+  open/close and browser restarts because it lives in local storage.
+- Bulk "Add All Verified" failures are enqueued respecting the same capacity and
+  report how many could not be queued.
+
+### 6.3 Scoped key and settings
+
+- Settings labels are now **Backend URL** and **Capture key**; the configured
+  backend URL is shown so local/production cannot be mixed accidentally.
+- **Test connection** performs an authenticated request
+  (`GET /api/v1/leads?limit=1` with `x-api-key`) and distinguishes:
+  - `connected` (2xx),
+  - `auth` (401/403: "Capture key rejected..."),
+  - `network` (unreachable / no status),
+  - `error` (other backend status).
+- The extension stores only `apiBaseUrl` and the capture key in
+  `chrome.storage.local`. It never receives or stores dashboard passwords,
+  HikerAPI keys, Gemini keys, or service-account credentials. A source-scanning
+  unit test enforces this.
+- **Boundary:** the backend currently authenticates capture with the shared
+  `API_KEY` (`x-api-key`); a separate capture-scoped credential remains a backend
+  authorization change. The extension is ready to accept it as the "Capture key"
+  without exposing administrative/provider credentials.
+
+### 6.4 Tests (V2-05)
+
+`extension/lib.test.js` grew to **49 tests** (10 new for V2-05):
+
+- 50-item capacity + overflow reason/message (V26);
+- dedupe by request id and in-place update;
+- discard removes only the targeted item;
+- retry payload reuses the original request id;
+- acknowledged saves leave the queue; failures are retained;
+- queue JSON round-trip at capacity (restart persistence);
+- items without a request id are rejected;
+- connection classification: auth vs network vs connected vs backend error (V27);
+- snapshot captures only profile-scoped fields (V32);
+- static source scan forbids admin/provider credential names (V27).
+
+Verification:
+
+```powershell
+npm --prefix extension test      # 49 passed
+node --test extension/lib.test.js
+node --check extension/lib.js extension/background.js extension/popup.js extension/content.js
+```
+
+`extension/package.json` was added so `npm --prefix extension test` runs the
+Node test suite.
+
+### 6.5 Files changed
+
+```text
+extension/lib.js         queue helpers + classifyConnection
+extension/background.js  connection check uses the shared classifier
+extension/popup.html     pending queue section, Backend URL / Capture key labels
+extension/popup.js       unified 50-item queue, per-item retry/discard, retry all
+extension/styles.css     queue item styles
+extension/package.json   NEW: test script
+extension/lib.test.js    10 new V2-05 tests
+extension/README.md      queue/settings/test docs
 ```

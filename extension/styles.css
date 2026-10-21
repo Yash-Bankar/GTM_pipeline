@@ -188,3 +188,61 @@ input {
   color: var(--text);
   font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
 }
+
+.queue {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.queue-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queue-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b1220;
+}
+
+.queue-item strong {
+  display: block;
+  font-size: 13px;
+}
+
+.queue-item .muted {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.queue-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+button.mini {
+  width: auto;
+  margin-top: 0;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+}

@@ -4,6 +4,8 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const SynpoLib = require("./lib.js");
 
@@ -464,4 +466,165 @@ test("runBulkSubmit retry reuses request ids without duplicating successes", asy
   // Retry of a failed account reuses the original request id (server dedupes).
   await SynpoLib.runBulkSubmit({ accounts: [{ username: "b.two", requestId: "req-b" }], submit });
   assert.deepEqual(seen, ["req-a", "req-b", "req-b"]);
+});
+
+// -- V2-05: pending queue, settings, connection ----------------------------
+
+test("queue enforces the 50-item capacity (V26)", () => {
+  let queue = [];
+  for (let index = 0; index < 50; index += 1) {
+    const result = SynpoLib.enqueueCapture(queue, {
+      requestId: `req-${index}`,
+      username: `creator.${index}`,
+    });
+    assert.equal(result.accepted, true);
+    queue = result.queue;
+  }
+
+  assert.equal(SynpoLib.pendingCount(queue), 50);
+  assert.equal(SynpoLib.isQueueFull(queue), true);
+
+  const overflow = SynpoLib.enqueueCapture(queue, { requestId: "req-50", username: "creator.50" });
+  assert.equal(overflow.accepted, false);
+  assert.equal(overflow.reason, "queue_full");
+  assert.equal(SynpoLib.pendingCount(overflow.queue), 50);
+  assert.match(SynpoLib.queueCapacityMessage(), /50\/50/);
+});
+
+test("queue dedupes by request id and updates in place", () => {
+  let queue = SynpoLib.enqueueCapture([], {
+    requestId: "req-a",
+    username: "a",
+    status: "pending",
+  }).queue;
+
+  const updated = SynpoLib.enqueueCapture(queue, {
+    requestId: "req-a",
+    username: "a",
+    status: "failed",
+    lastError: "offline",
+  });
+
+  assert.equal(updated.accepted, true);
+  assert.equal(updated.reason, "updated");
+  assert.equal(updated.queue.length, 1);
+  assert.equal(updated.queue[0].status, "failed");
+  assert.equal(updated.queue[0].lastError, "offline");
+});
+
+test("discard removes only the targeted pending item", () => {
+  const queue = ["a", "b", "c"].map((id) => ({ requestId: id, username: id }));
+  const next = SynpoLib.removeCapture(queue, "b");
+  assert.deepEqual(next.map((item) => item.requestId), ["a", "c"]);
+});
+
+test("retry payload reuses the original request id", () => {
+  const item = {
+    requestId: "req-original",
+    username: "creator",
+    snapshot: { bio: "evidence" },
+  };
+  assert.deepEqual(SynpoLib.retryPayload(item), {
+    username: "creator",
+    requestId: "req-original",
+    snapshot: { bio: "evidence" },
+  });
+});
+
+test("acknowledged saves leave the queue; failures stay for retry", () => {
+  assert.equal(SynpoLib.isAcknowledgedSave("created"), true);
+  assert.equal(SynpoLib.isAcknowledgedSave("duplicate"), true);
+  assert.equal(SynpoLib.isAcknowledgedSave("updated"), true);
+  for (const state of ["network", "auth", "config", "invalid", "error"]) {
+    assert.equal(SynpoLib.isAcknowledgedSave(state), false);
+  }
+});
+
+test("queue survives a storage round-trip at capacity (V26)", () => {
+  const queue = Array.from({ length: 50 }, (_, index) => ({
+    requestId: `req-${index}`,
+    username: `creator.${index}`,
+  }));
+  const restored = SynpoLib.normalizeQueue(JSON.parse(JSON.stringify(queue)));
+  assert.equal(SynpoLib.pendingCount(restored), 50);
+  assert.equal(SynpoLib.isQueueFull(restored), true);
+  assert.equal(
+    SynpoLib.enqueueCapture(restored, { requestId: "req-extra" }).accepted,
+    false,
+  );
+});
+
+test("queue rejects items without a request id", () => {
+  const result = SynpoLib.enqueueCapture([], { username: "no-id" });
+  assert.equal(result.accepted, false);
+  assert.equal(result.reason, "invalid");
+});
+
+test("classifyConnection distinguishes auth, network and backend errors (V27)", () => {
+  assert.equal(SynpoLib.classifyConnection({ status: 401 }).state, "auth");
+  assert.equal(SynpoLib.classifyConnection({ status: 403 }).state, "auth");
+  assert.equal(SynpoLib.classifyConnection({ error: true }).state, "network");
+  assert.equal(SynpoLib.classifyConnection({ status: 0 }).state, "network");
+  assert.equal(SynpoLib.classifyConnection({ status: 200 }).state, "connected");
+  assert.equal(SynpoLib.classifyConnection({ status: 204 }).state, "connected");
+  assert.equal(SynpoLib.classifyConnection({ status: 500 }).state, "error");
+});
+
+test("buildSnapshot captures only profile-scoped fields (V32)", () => {
+  const snapshot = SynpoLib.buildSnapshot(
+    {
+      displayName: "Preview Creator",
+      isVerified: true,
+      bioLines: ["Bio line"],
+      externalUrls: ["https://preview.example"],
+      followersText: "1.2K",
+      followingText: "10",
+      postsText: "20",
+    },
+    {
+      sourceUrl: "https://www.instagram.com/preview.creator/",
+      capturedAt: "2026-10-19T00:00:00Z",
+      parserVersion: "1",
+    },
+  );
+
+  assert.deepEqual(Object.keys(snapshot).sort(), [
+    "bio",
+    "captured_at",
+    "display_name",
+    "external_urls",
+    "followers",
+    "following",
+    "is_verified",
+    "missing_fields",
+    "parser_version",
+    "post_count",
+    "source_url",
+  ]);
+  assert.equal(snapshot.cookies, undefined);
+  assert.equal(snapshot.session, undefined);
+  assert.equal(snapshot.following.value, 10);
+  assert.equal(snapshot.followers.value, 1200);
+});
+
+test("extension source never references admin/provider credentials (V27)", () => {
+  const files = ["lib.js", "background.js", "popup.js", "content.js", "manifest.json"];
+  const forbidden = [
+    "GEMINI_API_KEY",
+    "HIKERAPI_KEY",
+    "DASHBOARD_PASSWORD",
+    "SESSION_SECRET",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "service_account",
+  ];
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(__dirname, file), "utf8");
+    for (const secret of forbidden) {
+      assert.equal(
+        text.includes(secret),
+        false,
+        `${file} must not reference ${secret}`,
+      );
+    }
+  }
 });

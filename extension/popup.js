@@ -9,14 +9,20 @@ const apiBaseInput = document.getElementById("apiBaseUrl");
 const apiKeyInput = document.getElementById("apiKey");
 const saveButton = document.getElementById("saveSettings");
 const checkButton = document.getElementById("checkConnection");
+const connectionResult = document.getElementById("connectionResult");
+const backendLabel = document.getElementById("backendLabel");
+const queueSection = document.getElementById("queueSection");
+const queueList = document.getElementById("queueList");
+const queueCount = document.getElementById("queueCount");
+const queueNote = document.getElementById("queueNote");
 
-const PENDING_CAPTURE = "pendingCapture";
-const PENDING_BATCH = "pendingBatch";
+const QUEUE_KEY = "captureQueue";
 
 let currentHandle = "";
 let currentSnapshot = null;
 let verifiedAccounts = [];
 let verifiedSupported = false;
+let queue = [];
 
 function setStatus(message, kind = "") {
   statusEl.textContent = message;
@@ -34,6 +40,17 @@ function setBatch(message, kind = "") {
   batchEl.className = `status ${kind}`;
 }
 
+function setConnection(message, kind = "") {
+  if (!message) {
+    connectionResult.hidden = true;
+    connectionResult.textContent = "";
+    return;
+  }
+  connectionResult.hidden = false;
+  connectionResult.textContent = message;
+  connectionResult.className = `status ${kind}`;
+}
+
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0];
@@ -49,29 +66,35 @@ async function sendToTab(type) {
   }
 }
 
+// -- settings --------------------------------------------------------------
+
 async function loadSettings() {
   const stored = await chrome.storage.local.get(["apiBaseUrl", "apiKey"]);
-  apiBaseInput.value = stored.apiBaseUrl || SynpoLib.DEFAULT_API_BASE;
+  const base = stored.apiBaseUrl || SynpoLib.DEFAULT_API_BASE;
+  apiBaseInput.value = base;
   apiKeyInput.value = stored.apiKey || "";
+  backendLabel.textContent = `Backend: ${SynpoLib.normalizeApiBase(base) || base}`;
 }
 
 async function saveSettings() {
-  await chrome.storage.local.set({
-    apiBaseUrl: SynpoLib.normalizeApiBase(apiBaseInput.value) || SynpoLib.DEFAULT_API_BASE,
-    apiKey: apiKeyInput.value.trim(),
-  });
+  const base = SynpoLib.normalizeApiBase(apiBaseInput.value) || SynpoLib.DEFAULT_API_BASE;
+  await chrome.storage.local.set({ apiBaseUrl: base, apiKey: apiKeyInput.value.trim() });
+  backendLabel.textContent = `Backend: ${base}`;
+  setConnection("");
   setStatus("Settings saved.", "ok");
 }
 
 async function checkConnection() {
-  setStatus("Checking connection…");
+  setConnection("Testing connection…");
   let result;
   try {
     result = await chrome.runtime.sendMessage({ type: "synpoCheckConnection" });
   } catch {
-    result = { ok: false, message: "Extension error." };
+    result = SynpoLib.classifyConnection({ error: true });
   }
-  setStatus(result && result.message ? result.message : "Done.", result && result.ok ? "ok" : "error");
+  const kind =
+    result.state === "connected" ? "ok" : result.state === "error" ? "error" : "warn";
+  setConnection(result.message || "Done.", kind);
 }
 
 // -- snapshot preview ------------------------------------------------------
@@ -137,29 +160,74 @@ function renderSnapshot(snapshot) {
   }
 }
 
-// -- pending capture storage ----------------------------------------------
+// -- pending queue ---------------------------------------------------------
 
-async function loadPending() {
-  const stored = await chrome.storage.local.get([PENDING_CAPTURE, PENDING_BATCH]);
-  const pending = stored[PENDING_CAPTURE];
-  const batch = stored[PENDING_BATCH] || [];
-  const hasPending = Boolean(pending) || batch.length > 0;
-  retryButton.hidden = !hasPending;
-  return { pending: pending || null, batch };
+async function loadQueue() {
+  const stored = await chrome.storage.local.get(QUEUE_KEY);
+  queue = SynpoLib.normalizeQueue(stored[QUEUE_KEY] || []);
+  renderQueue();
 }
 
-async function savePendingCapture(capture) {
-  if (capture) await chrome.storage.local.set({ [PENDING_CAPTURE]: capture });
-  else await chrome.storage.local.remove(PENDING_CAPTURE);
+async function saveQueue(next) {
+  queue = SynpoLib.normalizeQueue(next);
+  if (queue.length) await chrome.storage.local.set({ [QUEUE_KEY]: queue });
+  else await chrome.storage.local.remove(QUEUE_KEY);
+  renderQueue();
 }
 
-async function savePendingBatch(items) {
-  if (items && items.length) await chrome.storage.local.set({ [PENDING_BATCH]: items });
-  else await chrome.storage.local.remove(PENDING_BATCH);
+function renderQueue() {
+  const full = SynpoLib.isQueueFull(queue);
+  queueSection.hidden = queue.length === 0;
+  queueCount.textContent = `${queue.length}/${SynpoLib.QUEUE_LIMIT}`;
+  queueList.replaceChildren();
+
+  for (const item of queue) {
+    const li = document.createElement("li");
+    li.className = "queue-item";
+
+    const info = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = `@${item.username}`;
+    const meta = document.createElement("span");
+    meta.className = "muted";
+    meta.textContent = item.lastError ? `Failed: ${item.lastError}` : "Not acknowledged";
+    info.append(name, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "queue-actions";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "mini";
+    retry.textContent = "Retry";
+    retry.addEventListener("click", () => retryItem(item.requestId));
+    const discard = document.createElement("button");
+    discard.type = "button";
+    discard.className = "mini secondary";
+    discard.textContent = "Discard";
+    discard.addEventListener("click", () => discardItem(item.requestId));
+    actions.append(retry, discard);
+
+    li.append(info, actions);
+    queueList.append(li);
+  }
+
+  queueNote.hidden = !full;
+  if (full) queueNote.textContent = SynpoLib.queueCapacityMessage();
+
+  addButton.disabled = !currentHandle || full;
+  addAllButton.disabled = full || verifiedAccounts.length === 0;
+  retryButton.hidden = queue.length === 0;
 }
 
-function newRequestId() {
-  return SynpoLib.makeRequestId();
+async function enqueuePending(item) {
+  const result = SynpoLib.enqueueCapture(queue, item);
+  if (result.accepted) {
+    await saveQueue(result.queue);
+  } else if (result.reason === "queue_full") {
+    queueNote.hidden = false;
+    queueNote.textContent = SynpoLib.queueCapacityMessage();
+  }
+  return result;
 }
 
 function minimalSnapshot(account) {
@@ -173,7 +241,18 @@ function minimalSnapshot(account) {
   );
 }
 
-// -- single submission -----------------------------------------------------
+function failedItem({ requestId, username, snapshot, message }) {
+  return {
+    requestId,
+    username,
+    snapshot,
+    status: "failed",
+    lastError: message || "Not saved",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+// -- submission ------------------------------------------------------------
 
 async function submitSingle({ username, requestId, snapshot }) {
   return chrome.runtime.sendMessage({
@@ -189,10 +268,14 @@ async function addCurrent() {
     setStatus("No profile detected.", "warn");
     return;
   }
+  if (SynpoLib.isQueueFull(queue)) {
+    setStatus(SynpoLib.queueCapacityMessage(), "warn");
+    return;
+  }
   addButton.disabled = true;
   setStatus("Saving…");
 
-  const requestId = newRequestId();
+  const requestId = SynpoLib.makeRequestId();
   let result;
   try {
     result = await submitSingle({
@@ -204,42 +287,93 @@ async function addCurrent() {
     result = { state: "error", message: "Extension error." };
   }
 
-  if (result.state === "network") {
-    // Keep the exact payload + request id so a retry cannot double-submit.
-    await savePendingCapture({
-      username: currentHandle,
-      requestId,
-      snapshot: currentSnapshot,
-      savedAt: new Date().toISOString(),
-    });
-    retryButton.hidden = false;
-    setStatus("Not saved. Check the connection and retry.", "error");
-  } else {
-    await savePendingCapture(null);
-    const kind =
-      result.state === "created" || result.state === "updated"
-        ? "ok"
-        : result.state === "duplicate"
-          ? "warn"
-          : "error";
+  if (SynpoLib.isAcknowledgedSave(result.state)) {
+    // A successful acknowledgement removes any older pending copy.
+    await saveQueue(SynpoLib.removeCapture(queue, requestId));
+    const kind = result.state === "duplicate" ? "warn" : "ok";
     setStatus(result.message || "Done.", kind);
+  } else {
+    await enqueuePending(
+      failedItem({
+        requestId,
+        username: currentHandle,
+        snapshot: currentSnapshot,
+        message: result.message,
+      }),
+    );
+    setStatus(result.message || "Not saved. Retry from the pending list.", "error");
   }
-  addButton.disabled = false;
+  addButton.disabled = !currentHandle || SynpoLib.isQueueFull(queue);
 }
 
-// -- bulk submission -------------------------------------------------------
+async function retryItem(requestId) {
+  const item = queue.find((entry) => entry.requestId === requestId);
+  if (!item) return null;
+  let result;
+  try {
+    result = await submitSingle(SynpoLib.retryPayload(item));
+  } catch {
+    result = { state: "error", message: "Extension error." };
+  }
+
+  if (SynpoLib.isAcknowledgedSave(result.state)) {
+    await saveQueue(SynpoLib.removeCapture(queue, requestId));
+  } else {
+    await saveQueue(
+      SynpoLib.markCapture(queue, requestId, {
+        status: "failed",
+        lastError: result.message || "Not saved",
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
+  return result;
+}
+
+async function discardItem(requestId) {
+  await saveQueue(SynpoLib.removeCapture(queue, requestId));
+  setStatus("Pending save discarded.", "warn");
+}
+
+async function retryAll() {
+  if (!queue.length) return;
+  retryButton.disabled = true;
+  setStatus("Retrying pending saves…");
+  const ids = queue.map((item) => item.requestId);
+  let ok = 0;
+  let failed = 0;
+  for (const requestId of ids) {
+    const result = await retryItem(requestId);
+    if (result && SynpoLib.isAcknowledgedSave(result.state)) ok += 1;
+    else failed += 1;
+  }
+  retryButton.disabled = false;
+  setStatus(
+    `Retried ${ids.length}: ${ok} saved, ${failed} still pending.`,
+    failed ? "warn" : "ok",
+  );
+}
+
+// -- verified batch --------------------------------------------------------
 
 async function runBulk(items, { retrying = false } = {}) {
   addAllButton.disabled = true;
   setBatch(retrying ? "Retrying…" : "Adding…");
 
+  // Build each snapshot once so a queued retry sends the exact same payload
+  // (and therefore the same request-id hash) as the original attempt.
+  const prepared = items.map((item) => ({
+    ...item,
+    snapshot: item.snapshot || minimalSnapshot(item),
+  }));
+
   const summary = await SynpoLib.runBulkSubmit({
-    accounts: items,
+    accounts: prepared,
     submit: (account) =>
       submitSingle({
         username: account.username,
         requestId: account.requestId,
-        snapshot: minimalSnapshot(account),
+        snapshot: account.snapshot,
       }),
     onProgress: (progress) => {
       const done = progress.added + progress.existing + progress.skipped + progress.failed;
@@ -247,26 +381,44 @@ async function runBulk(items, { retrying = false } = {}) {
     },
   });
 
-  const handled = new Set(["created", "duplicate", "updated", "skipped", "invalid", "config"]);
-  const failedItems = items.filter((item) => {
+  const handled = new Set(["created", "duplicate", "updated", "skipped", "invalid"]);
+  const failedItems = prepared.filter((item) => {
     const found = summary.results.find((result) => result.username === item.username);
     return !found || !handled.has(found.state);
   });
 
-  await savePendingBatch(failedItems);
-  retryButton.hidden = failedItems.length === 0;
+  const queueFull = [];
+  for (const item of failedItems) {
+    const found = summary.results.find((result) => result.username === item.username);
+    const result = await enqueuePending(
+      failedItem({
+        requestId: item.requestId,
+        username: item.username,
+        snapshot: item.snapshot,
+        message: found && found.message,
+      }),
+    );
+    if (result.reason === "queue_full") queueFull.push(item.username);
+  }
 
-  const kind = summary.failed ? "error" : "ok";
+  const kind = summary.failed || queueFull.length ? "error" : "ok";
+  const capacityNote = queueFull.length
+    ? ` ${queueFull.length} could not be queued: ${SynpoLib.queueCapacityMessage()}`
+    : "";
   setBatch(
-    `Added ${summary.added} · Already saved ${summary.existing} · Skipped ${summary.skipped} · Failed ${summary.failed}`,
+    `Added ${summary.added} · Already saved ${summary.existing} · Skipped ${summary.skipped} · Failed ${summary.failed}.${capacityNote}`,
     kind,
   );
-  addAllButton.disabled = false;
+  addAllButton.disabled = SynpoLib.isQueueFull(queue) || verifiedAccounts.length === 0;
 }
 
 async function addAllVerified() {
   if (!verifiedAccounts.length) {
     setBatch("No verified accounts detected on this page.", "warn");
+    return;
+  }
+  if (SynpoLib.isQueueFull(queue)) {
+    setBatch(SynpoLib.queueCapacityMessage(), "warn");
     return;
   }
   const items = verifiedAccounts.map((account) => ({
@@ -277,37 +429,11 @@ async function addAllVerified() {
   await runBulk(items);
 }
 
-async function retryPending() {
-  const { pending, batch } = await loadPending();
-  retryButton.hidden = true;
-  setBatch("");
-
-  if (batch.length) {
-    await runBulk(batch, { retrying: true });
-  } else if (pending) {
-    addButton.disabled = true;
-    let result;
-    try {
-      result = await submitSingle({
-        username: `https://www.instagram.com/${pending.username}/`,
-        requestId: pending.requestId,
-        snapshot: pending.snapshot,
-      });
-    } catch {
-      result = { state: "error", message: "Extension error." };
-    }
-    if (result.state !== "network") await savePendingCapture(null);
-    else retryButton.hidden = false;
-    setStatus(result.message || "Done.", result.state === "network" ? "error" : "ok");
-    addButton.disabled = false;
-  }
-}
-
 // -- initialize ------------------------------------------------------------
 
 async function initialize() {
   await loadSettings();
-  await loadPending();
+  await loadQueue();
 
   const tab = await getActiveTab();
   currentHandle = SynpoLib.extractHandle(tab ? tab.url : "");
@@ -316,12 +442,17 @@ async function initialize() {
     handleEl.textContent = "Not a profile";
     addButton.disabled = true;
     addAllButton.hidden = true;
-    setStatus("Open an Instagram profile page first.", "warn");
+    setStatus(
+      queue.length
+        ? "Open an Instagram profile page. Pending saves are listed below."
+        : "Open an Instagram profile page first.",
+      "warn",
+    );
     return;
   }
 
   handleEl.textContent = `@${currentHandle}`;
-  addButton.disabled = false;
+  addButton.disabled = SynpoLib.isQueueFull(queue);
   setStatus("Reading the open profile…");
 
   const snapshotResult = await sendToTab("synpoReadSnapshot");
@@ -341,7 +472,8 @@ async function initialize() {
     verifiedAccounts = verifiedResult.accounts || [];
     if (verifiedSupported) {
       addAllButton.hidden = false;
-      addAllButton.disabled = verifiedAccounts.length === 0;
+      addAllButton.disabled =
+        SynpoLib.isQueueFull(queue) || verifiedAccounts.length === 0;
       addAllButton.textContent = `Add All Verified (${verifiedAccounts.length})`;
       if (!verifiedAccounts.length) addAllButton.title = "No verified accounts in the Suggested rail.";
     } else {
@@ -352,7 +484,7 @@ async function initialize() {
 
 addButton.addEventListener("click", addCurrent);
 addAllButton.addEventListener("click", addAllVerified);
-retryButton.addEventListener("click", retryPending);
+retryButton.addEventListener("click", retryAll);
 saveButton.addEventListener("click", saveSettings);
 checkButton.addEventListener("click", checkConnection);
 initialize();

@@ -31,22 +31,16 @@ async function handleSubmit(message) {
 async function handleCheckConnection() {
   const config = await getConfig();
   const base = SynpoLib.normalizeApiBase(config.apiBaseUrl || SynpoLib.DEFAULT_API_BASE);
-  if (!base) return { ok: false, state: "config", message: "Set the API URL first." };
+  if (!base) return { ok: false, state: "config", message: "Set the backend URL first." };
 
   const headers = { accept: "application/json" };
   if (config.apiKey && config.apiKey.trim()) headers["x-api-key"] = config.apiKey.trim();
 
   try {
     const response = await fetch(`${base}/api/v1/leads?limit=1`, { headers });
-    if (response.status === 401 || response.status === 403) {
-      return { ok: false, state: "auth", message: "Invalid or missing API key." };
-    }
-    if (!response.ok) {
-      return { ok: false, state: "error", message: `Backend returned ${response.status}.` };
-    }
-    return { ok: true, state: "ok", message: "Connected." };
+    return SynpoLib.classifyConnection({ status: response.status });
   } catch {
-    return { ok: false, state: "network", message: "Cannot reach the API." };
+    return SynpoLib.classifyConnection({ error: true });
   }
 }
 
