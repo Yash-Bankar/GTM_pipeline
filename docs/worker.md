@@ -97,6 +97,32 @@ mistaken for completed evidence (PRD §5.4).
 **`ai_dossier` only** with a `{"force": true}` payload. It does not create an
 outreach/draft job (V2-01). Draft generation is an explicit, separate request.
 
+## Draft generation as new versions (V2-07)
+
+`ai_outreach` runs only for an explicit generation request
+(`POST /api/v1/leads/{id}/drafts/generate`, which requires a current shortlist
+and an enabled AI capability). The request is stored in `outreach_revisions` and
+carries no content; the job payload references it by `request_id`.
+
+- On success the stage writes a **new** `draft_revisions` row and marks the
+  previous version `superseded`. Generation never overwrites content in place,
+  so an approved or manually authored draft is preserved (V23).
+- A request completes **once**: a retry, crash or restart finds
+  `result_revision_id` already set and returns without producing a second
+  version.
+- A failed generation records the error on the request
+  (`status="failed"`); no version is written, so no orphan is left behind.
+- The legacy `outreach_drafts` row is kept in sync as the "current draft"
+  pointer only.
+
+**Manual writing needs no AI key.** `POST /api/v1/leads/{id}/drafts` saves a new
+version directly; the worker is not involved. When AI is unavailable the
+generation request is rejected with `409 AI_UNAVAILABLE` **before** anything is
+written, so no revision, request or job is orphaned (V22).
+
+**No stage sends a message.** Manual "Log sent" writes an `outreach_events`
+row only; copying or exporting a draft never marks it as sent.
+
 ## `pipeline_jobs` table
 
 Columns: `job_id` (PK), `stage`, `lead_id`, `username`, `username_normalized`,

@@ -2,8 +2,8 @@
 
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_PRD_v2_Creator_Review.md` (v2.0, 20 October 2026)
-**Report date:** 2026-10-19
-**Status:** V2-01, V2-02, V2-03, V2-04, V2-05, and V2-06 **Complete**. V2-07 through V2-09 are tracked but not started.
+**Report date:** 2026-10-21
+**Status:** V2-01 through V2-07 **Complete**. V2-08 and V2-09 are tracked but not started.
 
 ---
 
@@ -17,7 +17,7 @@
 | V2-04 · Brief and public contacts | Full non-AI evidence brief, incidental contact extraction/provenance, legacy migration | **COMPLETE** |
 | V2-05 · Extension reliability | Capture preview, scoped key, 50-item queue, connection/retry outcomes | **COMPLETE** |
 | V2-06 · Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | **COMPLETE** |
-| V2-07 · Drafts and manual history | Manual editor, optional generation, immutable versions, copy/export, sent/reply events | Not started |
+| **V2-07 · Drafts and manual history** | Manual editor, optional generation, immutable versions, copy/export, sent/reply events | **COMPLETE** |
 | V2-08 · Review workspace UX | Creators views/detail, contextual actions, live progress, responsive forms | Not started |
 | V2-09 · Migration and release QA | Safe backfill, compatibility, test isolation, end-to-end sign-off | Not started |
 
@@ -201,7 +201,7 @@ Note: the backend suite lives in `tests/` (there is no `backend/tests/`); run
 
 ---
 
-## 3. V2-02 � Evidence and scheduling (Complete)
+## 3. V2-02 — Evidence and scheduling (Complete)
 
 ### 3.1 Capture receipts
 
@@ -372,7 +372,7 @@ docs/database.md  new tables + lead evidence columns
 
 ---
 
-## 4. V2-03 � Review and state (Complete)
+## 4. V2-03 — Review and state (Complete)
 
 ### 4.1 State model
 
@@ -393,8 +393,8 @@ One active campaign: `name`, `description`, `target_topics`, optional
 `language`, `follower_min`, `follower_max`, and an incrementing `version`
 (0 = not configured).
 
-- `GET /api/v1/campaign` � current configuration (version 0 when absent).
-- `PUT /api/v1/campaign` � replace/increment the version.
+- `GET /api/v1/campaign` — current configuration (version 0 when absent).
+- `PUT /api/v1/campaign` — replace/increment the version.
 - Updating criteria marks every `shortlisted` decision with
   `decision_currency=review_needed` and writes a system history event; this is
   a deliberate deterministic invalidation, not AI judgment.
@@ -587,12 +587,12 @@ docs/api.md, docs/database.md
 
 ---
 
-## 5. V2-04 � Brief and public contacts (Complete)
+## 5. V2-04 — Brief and public contacts (Complete)
 
 ### 5.1 Non-AI creator brief
 
 `GET /api/v1/leads/{lead_id}/brief` now returns a structured Creator brief built
-entirely from parsed evidence � no AI provider, no dossier row required:
+entirely from parsed evidence — no AI provider, no dossier row required:
 
 - identity (`username`, `full_name`, verified flag, category),
 - bio and `observed_topics` (category plus campaign topics actually present in the
@@ -628,7 +628,7 @@ email list is attributed to the first supplied URL when a page source is not
 available.
 
 **Visibility:** contacts are returned by `GET /api/v1/leads/{id}/contacts`, the
-`/detail` response, and the brief � for authenticated dashboard users, **with no
+`/detail` response, and the brief — for authenticated dashboard users, **with no
 shortlist/fit gate**.
 
 ### 5.3 Legacy contact migration
@@ -674,11 +674,11 @@ contacts backfilled from existing data).
 
 New `tests/test_brief_contacts.py` (6 tests):
 
-1. `test_brief_renders_without_ai` � brief works with AI disabled; no dossier.
-2. `test_incidental_contacts_are_extracted_with_provenance` � email + phone from a
+1. `test_brief_renders_without_ai` — brief works with AI disabled; no dossier.
+2. `test_incidental_contacts_are_extracted_with_provenance` — email + phone from a
    crawled page with source/time/method; visible immediately.
-3. `test_incidental_contacts_are_deduped_on_recrawl` � deterministic upsert.
-4. `test_legacy_contacts_are_labeled_source_unknown` � legacy label, original
+3. `test_incidental_contacts_are_deduped_on_recrawl` — deterministic upsert.
+4. `test_legacy_contacts_are_labeled_source_unknown` — legacy label, original
    fields preserved.
 5. `test_brief_includes_contacts_and_websites`.
 6. `test_phone_extraction_ignores_dates`.
@@ -731,7 +731,7 @@ docs/api.md, docs/database.md, docs/worker.md
 
 ---
 
-## 6. V2-05 � Extension reliability (Complete)
+## 6. V2-05 — Extension reliability (Complete)
 
 ### 6.1 Capture preview and payload
 
@@ -824,7 +824,7 @@ extension/README.md      queue/settings/test docs
 
 ---
 
-## 7. V2-06 � Explicit discovery (Complete)
+## 7. V2-06 — Explicit discovery (Complete)
 
 ### 7.1 Executable contact requests
 
@@ -900,9 +900,9 @@ Current migration head: **`f6a7b8c9d0e1`** (verified in PostgreSQL).
 
 - `POST /leads/{id}/contact-requests` body `{ note?, search_again? }`;
   `201` for a new attempt, `200` for a reused in-flight/completed request.
-- `GET /leads/{id}/contact-requests` � request history.
-- `POST /leads/{id}/contacts` � manual sourced contact.
-- `LeadDetailOut.contact_request` � latest request for the detail UI.
+- `GET /leads/{id}/contact-requests` — request history.
+- `POST /leads/{id}/contacts` — manual sourced contact.
+- `LeadDetailOut.contact_request` — latest request for the detail UI.
 
 ### 7.7 Frontend
 
@@ -973,6 +973,195 @@ app/(dashboard)/leads/[leadId]/page.tsx  pass status, manual form
 
 ```text
 docs/api.md, docs/database.md, docs/worker.md
+```
+
+---
+
+## 8. V2-07 · Drafts and manual history (Complete)
+
+### 8.1 Manual editor without an AI key (V22)
+
+`POST /api/v1/leads/{lead_id}/drafts` saves the draft as a **new version**. It
+never touches the AI provider and never needs a Gemini key, so the whole
+manual workflow stays usable with AI disabled (PRD 4.5).
+
+An explicit AI request is a different operation:
+`POST /api/v1/leads/{lead_id}/drafts/generate`.
+
+| Precondition | Result |
+| --- | --- |
+| AI disabled / key missing | `409` `{"code": "AI_UNAVAILABLE"}` — **no revision, request or job is written** |
+| Creator not on a current shortlist | `403` `{"code": "FIT_APPROVAL_REQUIRED"}` |
+| Both satisfied | `202` with the generation request; the worker writes a new version |
+
+The availability check happens **before** anything is persisted, so a rejected
+request leaves no orphan row (V22).
+
+### 8.2 Immutable versions (V23)
+
+Draft content lives in the new `draft_revisions` table. Versions are
+**append-only**:
+
+- Saving an edit creates the next version and marks the previous one
+  `superseded`. The old content stays visible as history.
+- Generating a version writes a **new** row whose `parent_revision_id` points at
+  the version it was generated from.
+- A request completes **once**: the stage checks `result_revision_id` and
+  returns "revision already generated" on a retry, crash or restart, so a second
+  version is never produced for the same request.
+- An approved or manually authored draft is never silently replaced; it is
+  superseded, and the new version sits beside it.
+
+Review state is per version: `needs_review` → `reviewed`. Editing reviewed
+content returns the **new** version to `needs_review`; the reviewed version
+itself keeps its state so the record of what was reviewed survives.
+
+### 8.3 Draft actions
+
+| Action | Endpoint | Notes |
+| --- | --- | --- |
+| Edit / Save | `POST /leads/{id}/drafts` | Creates a new version; previous one superseded |
+| Mark reviewed | `POST /leads/{id}/drafts/{rev}/review` | Changes only the review state |
+| Copy | `GET /leads/{id}/drafts/{rev}/text` | Returns plain text; **never** marks sent |
+| Export text | `GET /leads/{id}/drafts/{rev}/text` | Same payload, downloaded as `.txt` |
+| Generate new version | `POST /leads/{id}/drafts/generate` | Requires enabled AI + a current shortlist |
+| History | `GET /leads/{id}/drafts` | Every version, oldest first |
+
+### 8.4 Manual outreach logging (V24)
+
+`POST /api/v1/leads/{lead_id}/outreach-events` records a **manually logged**
+event. It requires:
+
+- a **channel** (`email` | `instagram_dm`),
+- a **sent time** (pre-populated with the current time in the UI, always
+  correctable),
+- and either the **draft revision** that was sent or a **manual note**.
+
+Outcomes: `Sent`, `Replied`, `Interested`, `Not interested`, `Follow up`. Every
+event is labelled `manually_logged` and records the actor as the shared
+dashboard operator — shared authentication is not a named employee.
+
+**Copy/export and Mark reviewed never create a Sent event.** Only an explicit
+manual log does. No route or stage sends a message.
+
+### 8.5 Corrections as visible history (V25)
+
+A correction is a **new event** that references the one it corrects
+(`corrects_event_id`, `source="manually_logged_correction"`). The original row
+is never rewritten, so the history keeps both entries while the latest summary
+reflects the correction.
+
+```
+sent      manually_logged             <- original, untouched
+replied   manually_logged             <- original, untouched
+interested manually_logged_correction  <- corrects "replied"
+```
+
+### 8.6 Exact database/schema changes
+
+Migration `a7b8c9d0e1f2` (down_revision `f6a7b8c9d0e1`):
+
+| Table | Purpose |
+| --- | --- |
+| `draft_revisions` (new) | One row per saved draft version: content, `status`, `method`, `model`, `parent_revision_id`, `contact_id`, `request_id`, `evidence_scope`, `note`, `edited_at` |
+| `outreach_events` (new) | Append-only manual log: `outcome`, `channel`, `revision_id`, `note`, `source`, `corrects_event_id`, `actor`, `sent_at`, `logged_at` |
+| `outreach_revisions` (extended) | Generation request → result link: `result_revision_id`, `parent_revision_id`, `job_id`, `error` |
+
+**Backfill:** every existing `outreach_drafts` row with content became the
+first `draft_revisions` row for its lead (`dr_legacy_<lead_id>`), preserving the
+content, its review state and the model that produced it. Nothing is discarded
+and no job or sent event is created. On the live database this preserved **8**
+existing drafts.
+
+### 8.7 API additions
+
+```text
+GET  /api/v1/leads/{lead_id}/drafts                      saved versions, oldest first
+POST /api/v1/leads/{lead_id}/drafts                      save/edit as a new version
+POST /api/v1/leads/{lead_id}/drafts/{revision_id}/review mark reviewed
+GET  /api/v1/leads/{lead_id}/drafts/{revision_id}/text   copy / export text
+POST /api/v1/leads/{lead_id}/drafts/generate             request a new AI version
+GET  /api/v1/leads/{lead_id}/outreach-events             manual outreach history
+POST /api/v1/leads/{lead_id}/outreach-events             log an event / a correction
+```
+
+### 8.8 Frontend
+
+| File | Change |
+| --- | --- |
+| `components/draft-editor.tsx` (new) | Save, Mark reviewed, Copy, Export text, Generate new version; unsaved-edit exit warning |
+| `components/outreach-log-form.tsx` (new) | Log sent / outcome form: channel, pre-filled sent time, revision or note |
+| `components/outreach-history.tsx` (new) | Manual history with "Manually logged" / "Correction" labels and a correct-this-entry action |
+| `app/(dashboard)/outreach/[leadId]/page.tsx` | Draft editor + log form + history + earlier versions |
+| `actions/drafts.ts` (new) | Server actions for every draft and logging operation |
+| `lib/api.ts`, `lib/types.ts` | Client methods and types for the new endpoints |
+
+### 8.9 Tests (V2-07)
+
+`tests/test_drafts_manual.py` — **22 new tests** covering the four acceptance
+scenarios:
+
+| Scenario | Coverage |
+| --- | --- |
+| **V22** | Manual draft works without an AI key; an AI request without a key is rejected with **no** orphan revision/request/job; a manual draft survives an AI-disabled request |
+| **V23** | Generation creates a new linked revision and supersedes the old one; a retry completes **once** and preserves earlier edits; a reviewed draft is never silently replaced; editing a reviewed draft returns the new version to `needs_review`; Mark reviewed does not fork a version |
+| **V24** | A sent log requires channel, sent time and a revision **or** a note; a note alone is accepted; copy/export never mark sent; Mark reviewed never marks sent; all five outcomes are logged as `manually_logged`; unknown outcome/channel are rejected |
+| **V25** | A correction is a new visible event and the original is untouched; the latest summary reflects the correction; a reply does not rewrite the sent log; correcting an unknown event is rejected; logging schedules no work |
+
+Existing coverage kept green: `test_outreach_stage_preserves_reviewed_drafts`,
+`test_outreach_stage_force_does_not_overwrite_approved_draft` and
+`test_outreach_stage_preserves_authored_draft_without_review_status` still
+pass, now via the revision path.
+
+### 8.10 Verification
+
+| Check | Result |
+| --- | --- |
+| `python -m pytest` | **293 passed** (271 + 22 new) |
+| `alembic upgrade head` | `a7b8c9d0e1f2 (head)` applied to the live database |
+| Live backfill | 8 legacy drafts preserved as `dr_legacy_*` revisions; 0 discarded |
+| Live API smoke | save → mark reviewed → copy text → log sent → log reply → correct → history: all `2xx`, history shows 3 events with the correction last |
+| Live V22 check | `409 AI_UNAVAILABLE`, 0 orphan requests, 0 orphan revisions, 0 orphan jobs |
+| `npm run lint` | clean |
+| `npx tsc --noEmit` | clean |
+| `npm run build` | success |
+
+### 8.11 Files changed
+
+**Backend**
+
+```text
+alembic/versions/a7b8c9d0e1f2_draft_revisions_outreach_events.py  NEW
+app/constants.py                    draft revision/generation/event constants
+app/db/models.py                    DraftRevision + OutreachEvent models
+app/db/schemas.py                   DraftRevision + OutreachEvent row models
+app/db/repository.py                draft revision + outreach event methods
+app/leads/drafts.py                 NEW DraftService (versions, events, generation)
+app/leads/draft_routes.py           NEW draft + outreach event routes
+app/leads/schemas.py                V2-07 request/response schemas
+app/dependencies.py                 get_draft_service
+app/main.py                         register the draft router
+app/worker/pipeline.py              AIOutreachStage writes a NEW revision
+tests/test_drafts_manual.py         NEW (22 tests)
+```
+
+**Frontend**
+
+```text
+actions/drafts.ts                   NEW server actions
+components/draft-editor.tsx         NEW
+components/outreach-log-form.tsx    NEW
+components/outreach-history.tsx     NEW
+app/(dashboard)/outreach/[leadId]/page.tsx  draft editor + logging + history
+lib/api.ts, lib/types.ts            new endpoints and types
+```
+
+**Docs**
+
+```text
+docs/api.md                         draft + event endpoints
+docs/database.md                    draft_revisions + outreach_events
+docs/worker.md                      generation as new versions
 ```
 
 ---

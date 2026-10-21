@@ -17,6 +17,7 @@ from app.campaigns.routes import router as campaign_router
 from app.config import get_settings
 from app.dashboard.routes import router as dashboard_router
 from app.db.errors import DuplicateLeadError, StorageError
+from app.leads.draft_routes import router as draft_router
 from app.leads.routes import router as leads_router
 from app.leads.validation import InvalidLeadInput
 
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(leads_router)
+app.include_router(draft_router)
 app.include_router(dashboard_router)
 app.include_router(campaign_router)
 

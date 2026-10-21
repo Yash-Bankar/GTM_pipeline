@@ -202,6 +202,66 @@ export interface OutreachRevisionList {
   total: number;
 }
 
+/** A saved draft content version (V2-07). */
+export interface DraftRevision {
+  revision_id: string;
+  lead_id: string;
+  username: string;
+  channel: string;
+  subject: string;
+  body: string;
+  dm_body: string;
+  status: "needs_review" | "reviewed" | "superseded" | string;
+  method: "manual" | "ai" | string;
+  model: string;
+  parent_revision_id: string;
+  contact_id: string;
+  request_id: string;
+  evidence_scope: string;
+  note: string;
+  edited_at: string;
+  created_at: string;
+}
+
+export interface DraftRevisionList {
+  items: DraftRevision[];
+  total: number;
+}
+
+export interface DraftText {
+  revision_id: string;
+  text: string;
+}
+
+/** A manually logged outreach event (V2-07). */
+export interface OutreachEvent {
+  event_id: string;
+  lead_id: string;
+  outcome:
+    | "sent"
+    | "replied"
+    | "interested"
+    | "not_interested"
+    | "follow_up"
+    | string;
+  channel: "email" | "instagram_dm" | string;
+  revision_id: string;
+  note: string;
+  source: "manually_logged" | "manually_logged_correction" | string;
+  corrects_event_id: string;
+  actor: string;
+  sent_at: string;
+  logged_at: string;
+  created_at: string;
+}
+
+export interface OutreachEventList {
+  items: OutreachEvent[];
+  total: number;
+  latest_outcome: string;
+}
+
+
 export interface BriefSource {
   url: string;
   title: string;

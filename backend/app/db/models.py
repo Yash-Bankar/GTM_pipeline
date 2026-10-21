@@ -224,7 +224,11 @@ class ContactRequest(Base):
 
 
 class OutreachRevision(Base):
-    """An explicit draft request; one row per request preserves history (T08)."""
+    """An explicit draft request; one row per request preserves history (T08).
+
+    V2-07: this row is the *generation request* - it carries no content of its
+    own. The content it produces lives in ``draft_revisions``.
+    """
 
     __tablename__ = "outreach_revisions"
 
@@ -238,6 +242,85 @@ class OutreachRevision(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     dm_body: Mapped[str] = mapped_column(Text, default="")
     requested_at: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    updated_at: Mapped[str] = mapped_column(String(40), default="")
+
+    # -- V2-07 additions ---------------------------------------------------
+    # The draft revision this request produced (empty while it is still running).
+    result_revision_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # The draft revision this request was generated from (its parent).
+    parent_revision_id: Mapped[str] = mapped_column(String(64), default="")
+    job_id: Mapped[str] = mapped_column(String(64), default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+class DraftRevision(Base):
+    """A saved draft content version (V2-07).
+
+    One row per saved version. A revision is never edited in place: editing
+    creates the next revision and supersedes the previous one, so approved or
+    manually authored content is never silently replaced.
+    """
+
+    __tablename__ = "draft_revisions"
+
+    revision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    username: Mapped[str] = mapped_column(String(255), default="")
+    username_normalized: Mapped[str] = mapped_column(String(255), default="")
+    channel: Mapped[str] = mapped_column(String(32), default="")
+    subject: Mapped[str] = mapped_column(Text, default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    dm_body: Mapped[str] = mapped_column(Text, default="")
+    # needs_review | reviewed | superseded
+    status: Mapped[str] = mapped_column(String(32), default="needs_review", index=True)
+    # manual | ai
+    method: Mapped[str] = mapped_column(String(32), default="manual", index=True)
+    model: Mapped[str] = mapped_column(String(128), default="")
+    # The revision this one was derived from (edit or regeneration parent).
+    parent_revision_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # The contact record used for the draft, when one was selected.
+    contact_id: Mapped[str] = mapped_column(String(64), default="")
+    # The generation request that produced this revision (empty for manual).
+    request_id: Mapped[str] = mapped_column(String(64), default="")
+    # Evidence scope the content was built from (V2-07 "source evidence").
+    evidence_scope: Mapped[str] = mapped_column(Text, default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    edited_at: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    updated_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class OutreachEvent(Base):
+    """A manually logged outreach event (V2-07).
+
+    History is append-only. A correction is a new event that references the
+    event it corrects; the original row is never rewritten.
+    """
+
+    __tablename__ = "outreach_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("leads.lead_id", ondelete="CASCADE"), index=True
+    )
+    # sent | replied | interested | not_interested | follow_up
+    outcome: Mapped[str] = mapped_column(String(32), default="sent", index=True)
+    # email | instagram_dm
+    channel: Mapped[str] = mapped_column(String(32), default="")
+    # The draft revision that was sent (optional: a manual note may be used).
+    revision_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    # "manually_logged" | "manually_logged_correction"
+    source: Mapped[str] = mapped_column(String(32), default="manually_logged", index=True)
+    # The event this one corrects (empty for a first-time log).
+    corrects_event_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # Shared dashboard authentication is not a named employee (PRD 4.5).
+    actor: Mapped[str] = mapped_column(String(64), default="")
+    sent_at: Mapped[str] = mapped_column(String(64), default="")
+    logged_at: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[str] = mapped_column(String(40), default="")
     updated_at: Mapped[str] = mapped_column(String(40), default="")
 

@@ -13,6 +13,9 @@ import type {
   ContactRequest,
   Dossier,
   DossierList,
+  DraftRevision,
+  DraftRevisionList,
+  DraftText,
   FitDecisionList,
   IntegrationsStatus,
   Lead,
@@ -20,6 +23,8 @@ import type {
   LeadList,
   LeadSubmission,
   Outreach,
+  OutreachEvent,
+  OutreachEventList,
   OutreachList,
   OutreachRevision,
   OutreachRevisionList,
@@ -187,6 +192,82 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     });
+  },
+
+  // -- V2-07: draft versions and manual outreach logging -------------------
+
+  listDrafts(leadId: string) {
+    return request<DraftRevisionList>(`/api/v1/leads/${encodeURIComponent(leadId)}/drafts`);
+  },
+
+  saveDraft(
+    leadId: string,
+    body: {
+      subject?: string;
+      body?: string;
+      dm_body?: string;
+      channel?: string;
+      note?: string;
+      contact_id?: string;
+      parent_revision_id?: string;
+    },
+  ) {
+    return request<DraftRevision>(`/api/v1/leads/${encodeURIComponent(leadId)}/drafts`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  markDraftReviewed(leadId: string, revisionId: string) {
+    return request<DraftRevision>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/drafts/${encodeURIComponent(revisionId)}/review`,
+      { method: "POST" },
+    );
+  },
+
+  draftText(leadId: string, revisionId: string) {
+    return request<DraftText>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/drafts/${encodeURIComponent(revisionId)}/text`,
+    );
+  },
+
+  generateDraft(
+    leadId: string,
+    body: { channel: "email" | "instagram_dm"; parent_revision_id?: string },
+  ) {
+    return request<DraftRevision>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/drafts/generate`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  },
+
+  listOutreachEvents(leadId: string) {
+    return request<OutreachEventList>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/outreach-events`,
+    );
+  },
+
+  logOutreachEvent(
+    leadId: string,
+    body: {
+      outcome: "sent" | "replied" | "interested" | "not_interested" | "follow_up";
+      channel: "email" | "instagram_dm";
+      sent_at?: string;
+      revision_id?: string;
+      note?: string;
+      corrects_event_id?: string;
+    },
+  ) {
+    return request<OutreachEvent>(
+      `/api/v1/leads/${encodeURIComponent(leadId)}/outreach-events`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
   },
 
   stats() {

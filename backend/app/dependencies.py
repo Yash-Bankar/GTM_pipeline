@@ -15,6 +15,7 @@ from app.campaigns.service import CampaignService
 from app.dashboard.service import DashboardService
 from app.db.database import get_db
 from app.db.repository import Repository
+from app.leads.drafts import DraftService
 from app.leads.service import LeadService
 
 
@@ -24,6 +25,10 @@ def get_repository(db: Session = Depends(get_db)) -> Repository:
 
 def get_lead_service(repo: Repository = Depends(get_repository)) -> LeadService:
     return LeadService(repo)
+
+
+def get_draft_service(repo: Repository = Depends(get_repository)) -> DraftService:
+    return DraftService(repo)
 
 
 def get_dashboard_service(repo: Repository = Depends(get_repository)) -> DashboardService:
@@ -48,6 +53,7 @@ __all__ = [
     "get_campaign_service",
     "get_dashboard_service",
     "get_db",
+    "get_draft_service",
     "get_lead_service",
     "get_repository",
     "require_api_key",

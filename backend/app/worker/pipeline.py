@@ -17,8 +17,18 @@ from app import constants
 from app.ai import AIService, Evidence, build_evidence
 from app.ai.service import DossierResult
 from app.db.repository import Repository
-from app.db.schemas import Contact, Dossier, Lead, LeadPost, OutreachEntry, PipelineJob, WebsitePage
-from app.db.util import contact_id, utc_now_iso
+from app.db.schemas import (
+    Contact,
+    Dossier,
+    DraftRevision,
+    Lead,
+    LeadPost,
+    OutreachEntry,
+    OutreachRevision,
+    PipelineJob,
+    WebsitePage,
+)
+from app.db.util import contact_id, new_job_id, utc_now_iso
 from app.leads.validation import InvalidLeadInput
 from app.worker.snapshot import parse_snapshot, snapshot_has_data, snapshot_to_lead_fields
 from app.providers.errors import (
@@ -111,8 +121,9 @@ def _job_request_id(job: PipelineJob) -> str:
 def _is_existing_draft(entry: OutreachEntry | None) -> bool:
     """True when an outreach row already holds reviewed or authored content.
 
-    Any such draft must be preserved by normal reruns and retries; explicit
-    regeneration is unavailable until revision storage exists (PRD T00 / A28).
+    V2-07: generation no longer overwrites in place. A draft that already
+    exists is superseded by a **new** revision, so this guard is only used for
+    the legacy "never silently replace" check on the current pointer.
     """
     if entry is None:
         return False
@@ -123,6 +134,23 @@ def _is_existing_draft(entry: OutreachEntry | None) -> bool:
         or (entry.body or "").strip()
         or (entry.dm_body or "").strip()
     )
+
+
+def _fail_generation(
+    repo: Repository, request: OutreachRevision | None, error: str
+) -> None:
+    """Record a failed generation request so no orphan revision is left."""
+    if request is None:
+        return
+    repo.update_outreach_revision(
+        request.revision_id,
+        {"status": constants.DRAFT_GENERATION_FAILED, "error": error[:4000]},
+    )
+
+
+def _evidence_scope(evidence: Evidence) -> str:
+    """A short, human-readable description of the evidence a draft used."""
+    return f"posts={len(evidence.posts or [])} pages={len(evidence.pages or [])}"
 
 
 def _page_id(lead_id: str, url: str) -> str:
@@ -640,7 +668,13 @@ class AIDossierStage:
 
 
 class AIOutreachStage:
-    """Generate personalized email/DM drafts marked NEEDS_REVIEW (Phase 6)."""
+    """Generate a personalized draft as a NEW revision (Phase 6 / V2-07).
+
+    V2-07: generation never overwrites. A successful run appends a new
+    ``draft_revisions`` row and supersedes the previous one, so an approved or
+    manually authored draft stays visible as history (V23). The legacy
+    ``outreach_drafts`` row is kept in sync as the "current" pointer.
+    """
 
     name = constants.STAGE_AI_OUTREACH
 
@@ -664,15 +698,26 @@ class AIOutreachStage:
         if lead is None:
             return StageOutcome(ok=False, error=f"lead {job.lead_id} not found", retryable=False)
 
-        existing = repo.get_outreach(job.lead_id)
-        if _is_existing_draft(existing):
-            if _job_force(job):
-                logger.warning(
-                    "Outreach regeneration requested for lead %s but revision storage "
-                    "is not available; preserving the existing draft.",
-                    job.lead_id,
-                )
-            return StageOutcome(ok=True, result="existing draft preserved")
+        request_id = _job_request_id(job)
+        request = repo.get_outreach_revision(request_id) if request_id else None
+
+        if request is not None:
+            # V23: a request completes once. A retry (or a crash and restart)
+            # must not produce a second revision for the same request.
+            if request.result_revision_id or request.status == constants.DRAFT_GENERATION_SUCCEEDED:
+                return StageOutcome(ok=True, result="revision already generated")
+        else:
+            # Legacy path: a job without an explicit request never replaces an
+            # existing draft.
+            existing = repo.get_outreach(job.lead_id)
+            if _is_existing_draft(existing):
+                if _job_force(job):
+                    logger.warning(
+                        "Outreach regeneration requested for lead %s without a "
+                        "draft request; preserving the existing draft.",
+                        job.lead_id,
+                    )
+                return StageOutcome(ok=True, result="existing draft preserved")
 
         pending = _pending_dependencies(repo, job.lead_id, _OUTREACH_DEPENDENCIES)
         if pending:
@@ -685,6 +730,14 @@ class AIOutreachStage:
 
         dossier = repo.get_dossier(job.lead_id)
         if dossier is None or dossier.status in (constants.AI_STATUS_INSUFFICIENT, constants.AI_STATUS_ERROR):
+            if request is not None:
+                repo.update_outreach_revision(
+                    request.revision_id,
+                    {
+                        "status": constants.DRAFT_GENERATION_FAILED,
+                        "error": "no usable dossier; outreach skipped",
+                    },
+                )
             return StageOutcome(ok=True, result="no usable dossier; outreach skipped")
 
         evidence = _build_evidence(
@@ -693,24 +746,69 @@ class AIOutreachStage:
         try:
             draft = self._service.generate_outreach(evidence, dossier.summary)
         except AIResponseError as exc:
+            _fail_generation(repo, request, _error_text(exc))
             return StageOutcome(ok=False, error=_error_text(exc), retryable=False)
         except (AIRateLimitError, AINetworkError) as exc:
+            _fail_generation(repo, request, _error_text(exc))
             return StageOutcome(ok=False, error=_error_text(exc), retryable=True)
         except (AIConfigError, AIError) as exc:
+            _fail_generation(repo, request, _error_text(exc))
             return StageOutcome(ok=False, error=_error_text(exc), retryable=False)
 
-        created_at = existing.created_at if existing is not None else ""
         now = utc_now_iso()
+        parent_revision_id = request.parent_revision_id if request is not None else ""
+        if not parent_revision_id:
+            current = repo.get_latest_draft_revision(job.lead_id)
+            parent_revision_id = current.revision_id if current is not None else ""
+        if parent_revision_id:
+            repo.supersede_draft_revision(parent_revision_id)
+
+        revision = repo.create_draft_revision(
+            DraftRevision(
+                revision_id=new_job_id("dr"),
+                lead_id=job.lead_id,
+                username=lead.username,
+                username_normalized=lead.username_normalized,
+                channel=request.channel if request is not None else "email+dm",
+                subject=draft.emailSubject.strip(),
+                body=draft.emailBody.strip(),
+                dm_body=draft.dmBody.strip(),
+                status=constants.DRAFT_REVISION_NEEDS_REVIEW,
+                method=constants.DRAFT_METHOD_AI,
+                model=self._model_name,
+                parent_revision_id=parent_revision_id,
+                contact_id="",
+                request_id=request.revision_id if request is not None else "",
+                evidence_scope=_evidence_scope(evidence),
+                note="",
+                edited_at=now,
+            )
+        )
+        if request is not None:
+            repo.update_outreach_revision(
+                request.revision_id,
+                {
+                    "status": constants.DRAFT_GENERATION_SUCCEEDED,
+                    "result_revision_id": revision.revision_id,
+                    "parent_revision_id": parent_revision_id,
+                    "job_id": job.job_id,
+                    "error": "",
+                },
+            )
+
+        # Keep the legacy single-row draft in sync as the "current" pointer.
+        existing = repo.get_outreach(job.lead_id)
+        created_at = existing.created_at if existing is not None else ""
         repo.upsert_outreach(
             OutreachEntry(
                 lead_id=job.lead_id,
                 username=lead.username,
                 username_normalized=lead.username_normalized,
-                channel="email+dm",
+                channel=revision.channel,
                 status=constants.AI_STATUS_NEEDS_REVIEW,
-                subject=draft.emailSubject.strip(),
-                body=draft.emailBody.strip(),
-                dm_body=draft.dmBody.strip(),
+                subject=revision.subject,
+                body=revision.body,
+                dm_body=revision.dm_body,
                 model=self._model_name,
                 generated_at=now,
                 created_at=created_at or now,

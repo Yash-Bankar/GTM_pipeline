@@ -357,6 +357,145 @@ class OutreachRevisionListOut(BaseModel):
     total: int
 
 
+# -- V2-07: draft versions and manual outreach events ----------------------
+
+
+class DraftRevisionOut(BaseModel):
+    """A saved draft content version."""
+
+    revision_id: str
+    lead_id: str
+    username: str = ""
+    channel: str = ""
+    subject: str = ""
+    body: str = ""
+    dm_body: str = ""
+    status: str = "needs_review"
+    method: str = "manual"
+    model: str = ""
+    parent_revision_id: str = ""
+    contact_id: str = ""
+    request_id: str = ""
+    evidence_scope: str = ""
+    note: str = ""
+    edited_at: str = ""
+    created_at: str = ""
+
+    @classmethod
+    def from_model(cls, revision) -> "DraftRevisionOut":
+        return cls(
+            revision_id=revision.revision_id,
+            lead_id=revision.lead_id,
+            username=revision.username,
+            channel=revision.channel,
+            subject=revision.subject,
+            body=revision.body,
+            dm_body=revision.dm_body,
+            status=revision.status,
+            method=revision.method,
+            model=revision.model,
+            parent_revision_id=revision.parent_revision_id,
+            contact_id=revision.contact_id,
+            request_id=revision.request_id,
+            evidence_scope=revision.evidence_scope,
+            note=revision.note,
+            edited_at=revision.edited_at,
+            created_at=revision.created_at,
+        )
+
+
+class DraftRevisionListOut(BaseModel):
+    items: list[DraftRevisionOut]
+    total: int
+
+
+class DraftSaveRequest(BaseModel):
+    """Save (or edit) a draft as a new version. Never needs an AI key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str = ""
+    body: str = ""
+    dm_body: str = ""
+    channel: str = ""
+    note: str = ""
+    contact_id: str = ""
+    parent_revision_id: str = ""
+
+
+class DraftGenerateRequest(BaseModel):
+    """An explicit AI generation request (requires enabled AI)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: Literal["email", "instagram_dm"] = "email"
+    contact_id: str = ""
+    parent_revision_id: str = ""
+
+
+class DraftTextOut(BaseModel):
+    """The plain text of a draft version (copy/export never marks it sent)."""
+
+    revision_id: str
+    text: str
+
+
+class OutreachEventOut(BaseModel):
+    """A manually logged outreach event."""
+
+    event_id: str
+    lead_id: str
+    outcome: str
+    channel: str
+    revision_id: str = ""
+    note: str = ""
+    source: str = "manually_logged"
+    corrects_event_id: str = ""
+    actor: str = ""
+    sent_at: str = ""
+    logged_at: str = ""
+    created_at: str = ""
+
+    @classmethod
+    def from_model(cls, event) -> "OutreachEventOut":
+        return cls(
+            event_id=event.event_id,
+            lead_id=event.lead_id,
+            outcome=event.outcome,
+            channel=event.channel,
+            revision_id=event.revision_id,
+            note=event.note,
+            source=event.source,
+            corrects_event_id=event.corrects_event_id,
+            actor=event.actor,
+            sent_at=event.sent_at,
+            logged_at=event.logged_at,
+            created_at=event.created_at,
+        )
+
+
+class OutreachEventListOut(BaseModel):
+    items: list[OutreachEventOut]
+    total: int
+    latest_outcome: str = ""
+
+
+class OutreachEventCreate(BaseModel):
+    """Log an outreach event manually (V24)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["sent", "replied", "interested", "not_interested", "follow_up"]
+    channel: Literal["email", "instagram_dm"]
+    # Pre-populated with the current time, but always correctable.
+    sent_at: str = ""
+    revision_id: str = ""
+    note: str = ""
+    # Correcting an earlier log creates a new visible event (V25).
+    corrects_event_id: str = ""
+
+
+
 class FitDecisionOut(BaseModel):
     decision_id: str
     lead_id: str

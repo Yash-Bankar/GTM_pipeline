@@ -87,7 +87,27 @@ timestamps. `page_id` is a deterministic hash of `(lead_id, url)`.
 
 ### `outreach_drafts` (PK `lead_id`)
 `username`, `username_normalized`, `channel`, `status`, `subject`, `body`,
-`dm_body`, `model`, `generated_at`, `last_error`, timestamps.
+`dm_body`, `model`, `generated_at`, `last_error`, timestamps. Kept as the
+"current draft" pointer; the version history lives in `draft_revisions`.
+
+### `draft_revisions` (PK `revision_id`) — V2-07
+`lead_id` → `leads` (cascade), `username`, `username_normalized`, `channel`,
+`subject`, `body`, `dm_body`, `status` (`needs_review`/`reviewed`/`superseded`),
+`method` (`manual`/`ai`), `model`, `parent_revision_id`, `contact_id`,
+`request_id`, `evidence_scope`, `note`, `edited_at`, timestamps.
+
+One row per saved draft version. Rows are **append-only**: editing, reviewing or
+regenerating creates the next version and marks the previous one `superseded`,
+so an approved or manually authored draft is never silently replaced.
+
+### `outreach_events` (PK `event_id`) — V2-07
+`lead_id` → `leads` (cascade), `outcome` (`sent`/`replied`/`interested`/
+`not_interested`/`follow_up`), `channel` (`email`/`instagram_dm`), `revision_id`,
+`note`, `source` (`manually_logged`/`manually_logged_correction`),
+`corrects_event_id`, `actor`, `sent_at`, `logged_at`, timestamps.
+
+Append-only history of manually logged outreach events. A correction is a **new**
+row that references the event it corrects; the original row is never rewritten.
 
 ### `pipeline_jobs` (PK `job_id`, **unique `(stage, lead_id)`**)
 `stage`, `lead_id` → `leads` (cascade), `username`, `username_normalized`,
@@ -103,10 +123,13 @@ timestamps. One active request at a time; repeated clicks reuse the
 in-flight/completed request for the same evidence version. Created only for a
 current shortlist.
 
-### `outreach_revisions` (PK `revision_id`) — T08
+### `outreach_revisions` (PK `revision_id`) — T08/V2-07
 `lead_id` → `leads` (cascade), `channel` (`email`/`instagram_dm`), `status`,
-`subject`, `body`, `dm_body`, `requested_at`, timestamps. One row per explicit
-draft request, so history is preserved.
+`subject`, `body`, `dm_body`, `requested_at`, `result_revision_id`,
+`parent_revision_id`, `job_id`, `error`, timestamps. One row per explicit
+**generation request**; the request itself carries no content. When the worker
+succeeds it writes a new `draft_revisions` row and records its id in
+`result_revision_id`.
 
 ### `worker_heartbeat` (PK `heartbeat_id`, singleton `worker`) — T09
 `worker_id`, `beat_at` (indexed), `updated_at`. Touched by the worker each poll

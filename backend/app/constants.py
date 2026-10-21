@@ -112,6 +112,60 @@ FIT_ACTOR_SYSTEM = "system"
 # Draft channels accepted by explicit draft requests.
 DRAFT_CHANNELS = ("email", "instagram_dm")
 
+# Draft revision states (V2-07). A revision is a saved content version; its
+# review state changes independently of the generation request lifecycle.
+DRAFT_REVISION_NEEDS_REVIEW = "needs_review"
+DRAFT_REVISION_REVIEWED = "reviewed"
+DRAFT_REVISION_SUPERSEDED = "superseded"
+DRAFT_REVISION_STATES = (
+    DRAFT_REVISION_NEEDS_REVIEW,
+    DRAFT_REVISION_REVIEWED,
+    DRAFT_REVISION_SUPERSEDED,
+)
+
+# How a draft revision's content was produced (V2-07).
+DRAFT_METHOD_MANUAL = "manual"
+DRAFT_METHOD_AI = "ai"
+DRAFT_METHODS = (DRAFT_METHOD_MANUAL, DRAFT_METHOD_AI)
+
+# Generation request lifecycle (V2-07). A request never carries content; it
+# produces a new revision when it succeeds.
+DRAFT_GENERATION_QUEUED = "queued"
+DRAFT_GENERATION_RUNNING = "running"
+DRAFT_GENERATION_SUCCEEDED = "succeeded"
+DRAFT_GENERATION_FAILED = "failed"
+DRAFT_GENERATION_CANCELLED = "cancelled"
+DRAFT_GENERATION_STATUSES = (
+    DRAFT_GENERATION_QUEUED,
+    DRAFT_GENERATION_RUNNING,
+    DRAFT_GENERATION_SUCCEEDED,
+    DRAFT_GENERATION_FAILED,
+    DRAFT_GENERATION_CANCELLED,
+)
+
+# Manually logged outreach events (V2-07). These are history, never state that
+# overwrites an earlier event.
+OUTREACH_EVENT_SENT = "sent"
+OUTREACH_EVENT_REPLIED = "replied"
+OUTREACH_EVENT_INTERESTED = "interested"
+OUTREACH_EVENT_NOT_INTERESTED = "not_interested"
+OUTREACH_EVENT_FOLLOW_UP = "follow_up"
+OUTREACH_EVENT_OUTCOMES = (
+    OUTREACH_EVENT_SENT,
+    OUTREACH_EVENT_REPLIED,
+    OUTREACH_EVENT_INTERESTED,
+    OUTREACH_EVENT_NOT_INTERESTED,
+    OUTREACH_EVENT_FOLLOW_UP,
+)
+# Every logged event is explicitly attributed to a human action.
+OUTREACH_EVENT_SOURCE_MANUAL = "manually_logged"
+# A correction is a new visible event that references the one it corrects.
+OUTREACH_EVENT_SOURCE_CORRECTION = "manually_logged_correction"
+
+# A draft can only be logged as sent once per revision; this bound keeps a
+# correction chain from growing without limit.
+OUTREACH_EVENT_MAX_CORRECTION_DEPTH = 10
+
 # A worker heartbeat older than this is reported as stale (PRD T09).
 WORKER_STALE_SECONDS = 60
 WORKER_HEARTBEAT_ID = "worker"

@@ -244,6 +244,115 @@ Secret-free readiness snapshot (authenticated like the rest of the API):
 List the outreach draft revision history for a lead, oldest first:
 `{ "items": [ ... ], "total": 2 }`. `404` for a missing lead.
 
+### Draft versions and manual logging (V2-07)
+
+Draft actions: **Edit, Save, Mark reviewed, Copy, Export text, Generate new
+version**. Manual writing never needs an AI key; only an explicit generation
+request does.
+
+#### `GET /api/v1/leads/{lead_id}/drafts`
+
+Every saved draft version for a lead, oldest first. Each version records its
+content, `status` (`needs_review` | `reviewed` | `superseded`), `method`
+(`manual` | `ai`), the model, the `parent_revision_id` it was derived from, the
+generation `request_id`, and the `evidence_scope` it was built from.
+
+```json
+{ "items": [ { "revision_id": "dr_...", "status": "needs_review", "method": "manual", "...": "..." } ], "total": 1 }
+```
+
+#### `POST /api/v1/leads/{lead_id}/drafts` (Save / Edit)
+
+Save the draft as a **new version**. The previous version is superseded but
+stays visible as history, so an approved or manually authored draft is never
+silently replaced. No AI key required.
+
+```json
+{
+  "subject": "Partnership",
+  "body": "Hi there",
+  "dm_body": "",
+  "channel": "email",
+  "note": "",
+  "contact_id": "",
+  "parent_revision_id": "dr_..."
+}
+```
+
+Returns `201` with the new version. `404` for a missing lead; `422` when the
+draft is completely empty.
+
+#### `POST /api/v1/leads/{lead_id}/drafts/{revision_id}/review` (Mark reviewed)
+
+Marks a saved version as `reviewed`. Only the review state changes - no new
+version is created, so the content that was reviewed is the content that stays.
+Editing reviewed content later returns the *new* version to `needs_review`.
+
+#### `GET /api/v1/leads/{lead_id}/drafts/{revision_id}/text` (Copy / Export text)
+
+Returns the plain text of a version: `{ "revision_id": "dr_...", "text": "..." }`.
+Copying and exporting **never** mark a draft as sent.
+
+#### `POST /api/v1/leads/{lead_id}/drafts/generate` (Generate new version)
+
+Requests an AI-generated version.
+
+- `409` with `{"code": "AI_UNAVAILABLE"}` when AI is disabled or the Gemini key
+  is missing. **No revision, request or job is created** - the request is
+  rejected before anything is written.
+- `403` with `{"code": "FIT_APPROVAL_REQUIRED"}` when the creator is not on a
+  current shortlist.
+- `202` with the generation request when accepted. The worker writes a **new**
+  version when it succeeds; earlier versions are preserved.
+
+```json
+{ "channel": "email", "parent_revision_id": "dr_..." }
+```
+
+#### `GET /api/v1/leads/{lead_id}/outreach-events`
+
+The manual outreach history, oldest first, plus the current summary:
+
+```json
+{
+  "items": [
+    { "event_id": "oe_...", "outcome": "sent", "channel": "email", "source": "manually_logged", "...": "..." }
+  ],
+  "total": 1,
+  "latest_outcome": "sent"
+}
+```
+
+#### `POST /api/v1/leads/{lead_id}/outreach-events` (Log sent / outcomes)
+
+Records a **manually logged** outreach event. Requires a channel, a sent time,
+and either the draft revision or a manual note.
+
+```json
+{
+  "outcome": "sent",
+  "channel": "email",
+  "sent_at": "2026-10-21T10:00:00Z",
+  "revision_id": "dr_...",
+  "note": "",
+  "corrects_event_id": ""
+}
+```
+
+- `outcome`: `sent` | `replied` | `interested` | `not_interested` | `follow_up`.
+- `channel`: `email` | `instagram_dm`.
+- `sent_at` is pre-populated with the current time in the UI and is always
+  correctable.
+- `corrects_event_id` turns the entry into a **correction**: a new visible event
+  that references the one it corrects. The original row is never rewritten, so
+  the history keeps both. `422` if the referenced event does not exist.
+- `422` when the outcome or channel is unknown, or when neither a revision nor a
+  note is given.
+
+Every event is labelled `manually_logged` (or `manually_logged_correction` for a
+correction) and records the actor as the shared dashboard operator - shared
+authentication is not a named employee. Logging never dispatches a message.
+
 ### `GET /api/v1/leads/{lead_id}/detail`
 
 Dashboard detail (lead, derived progress, posts, website pages, contacts, latest `contact_request`, jobs).

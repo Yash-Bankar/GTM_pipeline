@@ -19,11 +19,13 @@ __all__ = [
     "Contact",
     "ContactRequest",
     "Dossier",
+    "DraftRevision",
     "EvidenceVersion",
     "FitDecision",
     "Lead",
     "LeadPost",
     "OutreachEntry",
+    "OutreachEvent",
     "OutreachRevision",
     "PipelineJob",
     "RowModel",
@@ -229,6 +231,53 @@ class OutreachRevision(RowModel):
     requested_at: str = ""
     created_at: str = ""
     updated_at: str = ""
+    result_revision_id: str = ""
+    parent_revision_id: str = ""
+    job_id: str = ""
+    error: str = ""
+
+
+class DraftRevision(RowModel):
+    """A row in `draft_revisions` (one saved draft content version)."""
+
+    revision_id: str = ""
+    lead_id: str = ""
+    username: str = ""
+    username_normalized: str = ""
+    channel: str = ""
+    subject: str = ""
+    body: str = ""
+    dm_body: str = ""
+    status: str = "needs_review"
+    method: str = "manual"
+    model: str = ""
+    parent_revision_id: str = ""
+    contact_id: str = ""
+    request_id: str = ""
+    evidence_scope: str = ""
+    note: str = ""
+    edited_at: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class OutreachEvent(RowModel):
+    """A row in `outreach_events` (one manually logged outreach event)."""
+
+    event_id: str = ""
+    lead_id: str = ""
+    outcome: str = "sent"
+    channel: str = ""
+    revision_id: str = ""
+    note: str = ""
+    source: str = "manually_logged"
+    corrects_event_id: str = ""
+    actor: str = ""
+    sent_at: str = ""
+    logged_at: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
 
 
 class WorkerHeartbeat(RowModel):

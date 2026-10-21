@@ -34,6 +34,9 @@ from .models import (
     Dossier as DossierORM,
 )
 from .models import (
+    DraftRevision as DraftRevisionORM,
+)
+from .models import (
     EvidenceVersion as EvidenceVersionORM,
 )
 from .models import (
@@ -44,6 +47,9 @@ from .models import (
 )
 from .models import (
     OutreachDraft as OutreachORM,
+)
+from .models import (
+    OutreachEvent as OutreachEventORM,
 )
 from .models import (
     OutreachRevision as OutreachRevisionORM,
@@ -67,17 +73,25 @@ from .schemas import (
     Contact,
     ContactRequest,
     Dossier,
+    DraftRevision,
     EvidenceVersion,
     FitDecision,
     Lead,
     LeadPost,
     OutreachEntry,
+    OutreachEvent,
     OutreachRevision,
     PipelineJob,
     WebsitePage,
     WorkerHeartbeat,
 )
-from .util import new_job_id, new_lead_id, normalize_username, utc_now_iso
+from .util import (
+    new_job_id,
+    new_lead_id,
+    normalize_username,
+    utc_now_iso,
+    utc_now_iso_precise,
+)
 
 _LEAD_INT_FIELDS = {"follower_count", "follows_count"}
 _LEAD_BOOL_FIELDS = {"new_evidence_available"}
@@ -611,6 +625,24 @@ class Repository:
         self.session.commit()
         return OutreachRevision.model_validate(row)
 
+    def update_outreach_revision(
+        self, revision_id: str, fields: dict[str, object]
+    ) -> OutreachRevision | None:
+        """Update a generation request (status, result link, error)."""
+        row = self.session.get(OutreachRevisionORM, revision_id)
+        if row is None:
+            return None
+        for key, value in fields.items():
+            if hasattr(row, key):
+                setattr(row, key, "" if value is None else str(value))
+        row.updated_at = utc_now_iso()
+        self.session.commit()
+        return OutreachRevision.model_validate(row)
+
+    def get_outreach_revision(self, revision_id: str) -> OutreachRevision | None:
+        row = self.session.get(OutreachRevisionORM, revision_id)
+        return OutreachRevision.model_validate(row) if row is not None else None
+
     def list_outreach_revisions(self, lead_id: str) -> list[OutreachRevision]:
         rows = self.session.scalars(
             select(OutreachRevisionORM)
@@ -618,6 +650,89 @@ class Repository:
             .order_by(OutreachRevisionORM.created_at)
         ).all()
         return [OutreachRevision.model_validate(row) for row in rows]
+
+    # -- draft revisions (V2-07) --------------------------------------------
+
+    def create_draft_revision(self, revision: DraftRevision) -> DraftRevision:
+        """Append a new saved draft version.
+
+        Revisions are never updated in place: a new edit creates the next
+        revision and supersedes the previous one, so approved or manually
+        authored content is preserved (PRD 4.5 / V23).
+        """
+        now = utc_now_iso_precise()
+        data = revision.model_dump()
+        data["created_at"] = data.get("created_at") or now
+        data["updated_at"] = now
+        row = DraftRevisionORM(**data)
+        self.session.add(row)
+        self.session.commit()
+        return DraftRevision.model_validate(row)
+
+    def get_draft_revision(self, revision_id: str) -> DraftRevision | None:
+        row = self.session.get(DraftRevisionORM, revision_id)
+        return DraftRevision.model_validate(row) if row is not None else None
+
+    def list_draft_revisions(self, lead_id: str) -> list[DraftRevision]:
+        """Return every saved draft version for a lead, oldest first."""
+        rows = self.session.scalars(
+            select(DraftRevisionORM)
+            .where(DraftRevisionORM.lead_id == lead_id)
+            .order_by(DraftRevisionORM.created_at, DraftRevisionORM.revision_id)
+        ).all()
+        return [DraftRevision.model_validate(row) for row in rows]
+
+    def get_latest_draft_revision(self, lead_id: str) -> DraftRevision | None:
+        """Return the current (not superseded) draft version for a lead."""
+        rows = self.list_draft_revisions(lead_id)
+        active = [row for row in rows if row.status != constants.DRAFT_REVISION_SUPERSEDED]
+        return (active or rows)[-1] if rows else None
+
+    def supersede_draft_revision(self, revision_id: str) -> DraftRevision | None:
+        """Mark a draft version as superseded (it stays visible as history)."""
+        row = self.session.get(DraftRevisionORM, revision_id)
+        if row is None:
+            return None
+        row.status = constants.DRAFT_REVISION_SUPERSEDED
+        row.updated_at = utc_now_iso()
+        self.session.commit()
+        return DraftRevision.model_validate(row)
+
+    def set_draft_revision_status(self, revision_id: str, status: str) -> DraftRevision | None:
+        """Change only the review state of a saved draft version."""
+        row = self.session.get(DraftRevisionORM, revision_id)
+        if row is None:
+            return None
+        row.status = status
+        row.updated_at = utc_now_iso()
+        self.session.commit()
+        return DraftRevision.model_validate(row)
+
+    # -- outreach events (V2-07) -------------------------------------------
+
+    def create_outreach_event(self, event: OutreachEvent) -> OutreachEvent:
+        """Append a manually logged outreach event (history is append-only)."""
+        now = utc_now_iso_precise()
+        data = event.model_dump()
+        data["created_at"] = data.get("created_at") or now
+        data["updated_at"] = now
+        row = OutreachEventORM(**data)
+        self.session.add(row)
+        self.session.commit()
+        return OutreachEvent.model_validate(row)
+
+    def get_outreach_event(self, event_id: str) -> OutreachEvent | None:
+        row = self.session.get(OutreachEventORM, event_id)
+        return OutreachEvent.model_validate(row) if row is not None else None
+
+    def list_outreach_events(self, lead_id: str) -> list[OutreachEvent]:
+        """Return the manual outreach history for a lead, oldest first."""
+        rows = self.session.scalars(
+            select(OutreachEventORM)
+            .where(OutreachEventORM.lead_id == lead_id)
+            .order_by(OutreachEventORM.logged_at, OutreachEventORM.created_at, OutreachEventORM.event_id)
+        ).all()
+        return [OutreachEvent.model_validate(row) for row in rows]
 
     # -- worker heartbeat (T09) -------------------------------------------
 
