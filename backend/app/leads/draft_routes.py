@@ -11,7 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app import constants
 from app.config import get_settings
-from app.dependencies import get_draft_service, require_api_key
+from app.dependencies import (
+    get_draft_service,
+    require_capture_key,
+    require_operator_key,
+)
 from app.leads.drafts import (
     DraftNotFoundError,
     DraftService,
@@ -33,7 +37,6 @@ from app.leads.schemas import (
 router = APIRouter(
     prefix="/api/v1",
     tags=["drafts"],
-    dependencies=[Depends(require_api_key)],
 )
 
 
@@ -47,7 +50,8 @@ def _ai_available() -> bool:
     "/leads/{lead_id}/drafts",
     response_model=DraftRevisionListOut,
     summary="List saved draft versions (oldest first)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def list_drafts(
     lead_id: str,
     service: DraftService = Depends(get_draft_service),
@@ -64,7 +68,8 @@ def list_drafts(
     response_model=DraftRevisionOut,
     status_code=status.HTTP_201_CREATED,
     summary="Save a draft as a new version (manual, no AI key required)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def save_draft(
     lead_id: str,
     payload: DraftSaveRequest,
@@ -93,7 +98,8 @@ def save_draft(
     "/leads/{lead_id}/drafts/{revision_id}/review",
     response_model=DraftRevisionOut,
     summary="Mark a saved draft version as reviewed",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def mark_draft_reviewed(
     lead_id: str,
     revision_id: str,
@@ -113,7 +119,8 @@ def mark_draft_reviewed(
     "/leads/{lead_id}/drafts/{revision_id}/text",
     response_model=DraftTextOut,
     summary="Get the plain text of a draft version (copy/export never marks sent)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def get_draft_text(
     lead_id: str,
     revision_id: str,
@@ -134,7 +141,8 @@ def get_draft_text(
     response_model=DraftRevisionOut,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Request a new AI-generated draft version",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def generate_draft(
     lead_id: str,
     payload: DraftGenerateRequest,
@@ -199,7 +207,8 @@ def generate_draft(
     "/leads/{lead_id}/outreach-events",
     response_model=OutreachEventListOut,
     summary="List the manual outreach history (oldest first)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def list_outreach_events(
     lead_id: str,
     service: DraftService = Depends(get_draft_service),
@@ -218,7 +227,8 @@ def list_outreach_events(
     response_model=OutreachEventOut,
     status_code=status.HTTP_201_CREATED,
     summary="Log an outreach event manually (sent / replied / interested / ...)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def log_outreach_event(
     lead_id: str,
     payload: OutreachEventCreate,

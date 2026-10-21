@@ -31,8 +31,17 @@ class Settings(BaseSettings):
     # Backend API
     api_host: str = "127.0.0.1"
     api_port: int = 8000
-    # When set, API requests must send a matching `x-api-key` header.
+    # When set, API requests must send a matching `x-api-key` header. This is
+    # the **dashboard operator** key: it grants full administrative access.
     api_key: str = ""
+    # Optional **capture-scoped** key for the extension (V2-09 / PRD rule 6).
+    #
+    # A capture key may only submit evidence and read its own receipt. It is
+    # rejected on every dashboard-administration route (decisions, discovery,
+    # drafts, retries, settings). When it is unset the extension falls back to
+    # the shared API_KEY, which keeps the existing single-key deployment
+    # working; set it to enforce the boundary.
+    capture_api_key: str = ""
     # Comma-separated CORS origins for browser clients (e.g. the extension).
     cors_allow_origins: str = "*"
 

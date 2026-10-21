@@ -12,16 +12,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 __all__ = [
     "changed_snapshot_fields",
     "field_provenance",
+    "is_contact_only_change",
     "material_change_reasons",
     "merge_snapshot",
     "payload_hash",
     "recency",
+    "strip_contacts",
 ]
 
 _STRING_FIELDS = ("display_name", "bio", "source_url", "captured_at", "parser_version")
@@ -37,6 +40,92 @@ _MATERIAL_FIELDS = (
 )
 # Client clocks further than this ahead of the server receipt are not trusted.
 _CLOCK_SKEW_TOLERANCE = timedelta(seconds=300)
+
+# Contact details inside free text. A bio that only gains or loses a contact
+# is a *contact-only* change and is not material (PRD V15).
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+_PHONE_RE = re.compile(r"(?<!\w)\+?\d[\d\s().\-]{6,}\d(?!\w)")
+# A handle must not start inside an email address or a URL.
+_HANDLE_RE = re.compile(r"(?<![\w.+-])@\w[\w.]*")
+
+
+def strip_contacts(text: str) -> str:
+    """Return ``text`` with contact details removed.
+
+    Used to tell a *contact-only* bio change (a new email or handle) apart
+    from a real content change. The PRD treats the former as non-material: it
+    must not force a shortlist back into "Review needed".
+    """
+    if not text:
+        return ""
+    cleaned = _EMAIL_RE.sub(" ", text)
+    cleaned = _URL_RE.sub(" ", cleaned)
+    cleaned = _PHONE_RE.sub(" ", cleaned)
+    cleaned = _HANDLE_RE.sub(" ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _contact_tokens(text: str) -> set[str]:
+    """Return the contact tokens (emails, links, handles, phones) in ``text``."""
+    if not text:
+        return set()
+    tokens: set[str] = set()
+    tokens.update(match.group(0).lower().strip(".,;") for match in _EMAIL_RE.finditer(text))
+    tokens.update(match.group(0).lower().strip(".,;") for match in _URL_RE.finditer(text))
+    tokens.update(match.group(0).lower().strip(".,;") for match in _HANDLE_RE.finditer(text))
+    tokens.update(
+        re.sub(r"\s+", "", match.group(0)) for match in _PHONE_RE.finditer(text)
+    )
+    return {token for token in tokens if token}
+
+
+def is_contact_only_change(before: str, after: str) -> bool:
+    """True when the only difference between two bios is contact detail.
+
+    A bio that gains or loses an email, link, handle or phone is a
+    *contact-only* change and is not material (PRD V15). Text that changed in
+    any other way - including surrounding words such as "Reach me at" - is
+    still a real change.
+    """
+    before = (before or "").strip()
+    after = (after or "").strip()
+    if before == after:
+        return True
+    if not before or not after:
+        return False
+
+    # The contact sets must differ (otherwise this is not a contact change).
+    if _contact_tokens(before) == _contact_tokens(after):
+        return False
+
+    # Remove the contact tokens and the connective words that introduce them,
+    # then compare what is left.
+    left = _strip_connective(strip_contacts(before))
+    right = _strip_connective(strip_contacts(after))
+    if left == right:
+        return True
+
+    # One side may be empty once the contacts (and their lead-in) are removed.
+    return not left or not right
+
+
+# Words that introduce a contact and carry no meaning of their own.
+_CONTACT_LEAD_IN = re.compile(
+    r"\b(reach me at|contact me at|email me at|write to|write me at|"
+    r"dm me at|message me at|my (?:email|handle|contact|number) is|"
+    r"email:?|contact:?|phone:?|handle:?|telegram:?|whatsapp:?)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_connective(text: str) -> str:
+    """Remove contact lead-in phrases and the punctuation around them."""
+    cleaned = _CONTACT_LEAD_IN.sub(" ", text)
+    cleaned = re.sub(r"[:\-–—]+", " ", cleaned)
+    # Drop trailing and leading punctuation left behind by the removal.
+    cleaned = re.sub(r"[.!?,;:]+", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _parse_iso(value: object) -> datetime | None:
@@ -261,12 +350,18 @@ def material_change_reasons(
     Only bio changes, external-domain changes, and follower counts crossing an
     explicitly configured campaign threshold are material. Timestamp-only or
     display-only recaptures are not.
+
+    A **contact-only** bio change - one that only adds or removes an email,
+    phone, handle or link - is not material (PRD V15): it must not push a
+    current shortlist back into "Review needed".
     """
     before = before or {}
     after = after or {}
     reasons: list[str] = []
 
-    if str(before.get("bio") or "").strip() != str(after.get("bio") or "").strip():
+    before_bio = str(before.get("bio") or "").strip()
+    after_bio = str(after.get("bio") or "").strip()
+    if before_bio != after_bio and not is_contact_only_change(before_bio, after_bio):
         reasons.append("Bio changed")
 
     if external_domains(before) != external_domains(after):

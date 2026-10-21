@@ -40,13 +40,76 @@ def get_campaign_service(repo: Repository = Depends(get_repository)) -> Campaign
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Reject requests missing a valid `x-api-key` when API_KEY is configured."""
+    """Reject requests missing a valid `x-api-key` when API_KEY is configured.
+
+    This is the **dashboard operator** credential: it grants full
+    administrative access (decisions, discovery, drafts, retries, settings).
+    """
     expected = get_settings().api_key.strip()
     if expected and x_api_key != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key.",
         )
+
+
+def require_capture_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Authorise a **capture-scoped** request (the extension, V2-09).
+
+    PRD server rule 6: "Capture credentials can submit evidence/check
+    connectivity/read their receipt; dashboard administration controls
+    decisions, discovery and drafts."
+
+    A capture key may:
+      - submit a profile capture (``POST /leads``),
+      - check connectivity (``GET /leads?limit=1``),
+      - read its own receipt (``GET /leads/{lead_id}``).
+
+    It is **rejected** on every dashboard-administration route. When
+    ``CAPTURE_API_KEY`` is not configured the extension falls back to the shared
+    operator key, which preserves the existing single-key deployment.
+    """
+    settings = get_settings()
+    capture_key = settings.capture_api_key.strip()
+    provided = (x_api_key or "").strip()
+
+    if not capture_key:
+        # No capture-scoped credential configured: behave exactly as before.
+        require_api_key(x_api_key)
+        return
+
+    if provided == capture_key:
+        return
+    if provided and provided == settings.api_key.strip():
+        # The operator key is also accepted here; the route itself is a
+        # capture route, so this is not a privilege escalation.
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing capture key.",
+    )
+
+
+def require_operator_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Reject a **capture-scoped** key on a dashboard-administration route.
+
+    Used by the administration routers so the extension's capture key cannot
+    make decisions, run discovery, prepare drafts or retry work (V27).
+    """
+    settings = get_settings()
+    capture_key = settings.capture_api_key.strip()
+    provided = (x_api_key or "").strip()
+
+    if capture_key and provided == capture_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "The capture key cannot access dashboard administration. "
+                "Use the operator API key."
+            ),
+        )
+    require_api_key(x_api_key)
 
 
 __all__ = [
@@ -57,4 +120,6 @@ __all__ = [
     "get_lead_service",
     "get_repository",
     "require_api_key",
+    "require_capture_key",
+    "require_operator_key",
 ]

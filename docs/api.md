@@ -398,6 +398,54 @@ authentication is not a named employee. Logging never dispatches a message.
 
 Dashboard detail (lead, derived progress, posts, website pages, contacts, latest `contact_request`, jobs).
 
+## Authorization: capture vs operator (V2-09 / V27)
+
+The API has two credential scopes (PRD server rule 6: "Capture credentials can
+submit evidence/check connectivity/read their receipt; dashboard administration
+controls decisions, discovery and drafts").
+
+| Credential | Env var | Scope |
+| --- | --- | --- |
+| **Operator** | `API_KEY` | Everything. The dashboard uses this. |
+| **Capture** | `CAPTURE_API_KEY` (optional) | Submit evidence, check connectivity, read its own receipt. **Nothing else.** |
+
+### Capture-scoped routes
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/leads` | Submit a profile capture |
+| `GET` | `/api/v1/leads` | Connectivity check (the extension's "Test connection") |
+| `GET` | `/api/v1/leads/{lead_id}` | Read the capture receipt |
+
+### Operator-only routes
+
+Every other route is dashboard administration: fit decisions, contact
+discovery, draft versions and generation, outreach events, retries, campaign
+criteria, stats, briefs, dossiers and the integration status.
+
+A capture key used on an operator route is rejected with **403**:
+
+```json
+{ "detail": "The capture key cannot access dashboard administration. Use the operator API key." }
+```
+
+A wrong or missing key is rejected with **401** and the body never echoes a
+key, a secret or the provided value.
+
+### Backwards compatibility
+
+When `CAPTURE_API_KEY` is **not** set, `require_capture_key` falls back to the
+shared `API_KEY`, so the existing single-key deployment keeps working
+unchanged. Set `CAPTURE_API_KEY` to enforce the boundary:
+
+```text
+API_KEY=<the dashboard operator key>
+CAPTURE_API_KEY=<the key the extension is given>
+```
+
+The extension already labels the field **Capture key** and stores only that;
+it never receives a dashboard, HikerAPI or Gemini credential.
+
 ## Behavior
 
 - **Validation**: accepts bare handles or `instagram.com` URLs; rejects other

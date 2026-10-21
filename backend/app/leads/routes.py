@@ -5,7 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.dashboard.schemas import ContactOut
-from app.dependencies import get_lead_service, require_api_key
+from app.dependencies import (
+    get_lead_service,
+    require_capture_key,
+    require_operator_key,
+)
 from app.leads.schemas import (
     ContactRequestCreate,
     ContactRequestListOut,
@@ -28,8 +32,12 @@ from app.leads.views import SAVED_VIEWS, VIEW_LABELS, normalize_view
 router = APIRouter(
     prefix="/api/v1",
     tags=["leads"],
-    dependencies=[Depends(require_api_key)],
 )
+
+# Capture-scoped routes: the extension may submit evidence, check
+# connectivity and read its own receipt (PRD server rule 6 / V27). Every
+# other route in this router is dashboard administration and is therefore
+# operator-only, enforced by ``require_operator_key``.
 
 
 @router.post(
@@ -37,6 +45,7 @@ router = APIRouter(
     response_model=LeadSubmissionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Submit a lead (idempotent by normalized username)",
+    dependencies=[Depends(require_capture_key)],
 )
 def submit_lead(
     payload: LeadCreateRequest,
@@ -73,7 +82,8 @@ def submit_lead(
     "/leads",
     response_model=LeadListResponse,
     summary="List leads with pagination, saved view, and optional search/status filter",
-)
+
+    dependencies=[Depends(require_capture_key)],)
 def list_leads(
     limit: int = Query(50, ge=1, le=500, description="Page size."),
     offset: int = Query(0, ge=0, description="Number of leads to skip."),
@@ -117,7 +127,8 @@ def list_leads(
     "/leads/{lead_id}",
     response_model=LeadResponse,
     summary="Fetch a single lead by its stable leadId",
-)
+
+    dependencies=[Depends(require_capture_key)],)
 def get_lead(
     lead_id: str,
     service: LeadService = Depends(get_lead_service),
@@ -136,7 +147,8 @@ def get_lead(
     "/leads/{lead_id}/fit",
     response_model=LeadResponse,
     summary="Record a manual fit decision (T08)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def decide_fit(
     lead_id: str,
     payload: FitDecisionRequest,
@@ -168,7 +180,8 @@ def decide_fit(
     response_model=ContactRequestOut,
     status_code=status.HTTP_201_CREATED,
     summary="Request public contact details (requires approved fit)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def request_contact(
     lead_id: str,
     response: Response,
@@ -210,7 +223,8 @@ def request_contact(
     response_model=OutreachRevisionOut,
     status_code=status.HTTP_201_CREATED,
     summary="Request a new outreach draft revision (requires approved fit)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def request_draft(
     lead_id: str,
     payload: DraftRequestCreate,
@@ -243,7 +257,8 @@ def request_draft(
     "/leads/{lead_id}/draft-requests",
     response_model=OutreachRevisionListOut,
     summary="List outreach draft revision history (T08)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def list_draft_requests(
     lead_id: str,
     service: LeadService = Depends(get_lead_service),
@@ -264,7 +279,8 @@ def list_draft_requests(
     "/leads/{lead_id}/fit-decisions",
     response_model=FitDecisionListOut,
     summary="List fit decision history (V2-03)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def list_fit_decisions(
     lead_id: str,
     service: LeadService = Depends(get_lead_service),
@@ -285,7 +301,8 @@ def list_fit_decisions(
     "/leads/{lead_id}/contact-requests",
     response_model=ContactRequestListOut,
     summary="List explicit contact-discovery requests (V2-06)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def list_contact_requests(
     lead_id: str,
     service: LeadService = Depends(get_lead_service),
@@ -307,7 +324,8 @@ def list_contact_requests(
     response_model=ContactOut,
     status_code=status.HTTP_201_CREATED,
     summary="Add a sourced public contact manually (V2-06 fallback)",
-)
+
+    dependencies=[Depends(require_operator_key)],)
 def add_contact(
     lead_id: str,
     payload: ManualContactCreate,

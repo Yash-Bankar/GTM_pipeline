@@ -24,14 +24,17 @@ from app.dashboard.schemas import (
     WebsitePageOut,
 )
 from app.dashboard.service import DashboardService
-from app.dependencies import get_dashboard_service, require_api_key
+from app.dependencies import get_dashboard_service, require_operator_key
 from app.leads.schemas import ContactRequestOut, LeadResponse
 
 router = APIRouter(
     prefix="/api/v1",
     tags=["dashboard"],
-    dependencies=[Depends(require_api_key)],
+    # Every route here is dashboard administration: the extension's
+    # capture-scoped key is rejected (PRD server rule 6 / V27).
+    dependencies=[Depends(require_operator_key)],
 )
+
 
 
 @router.get("/leads/{lead_id}/detail", response_model=LeadDetailOut)

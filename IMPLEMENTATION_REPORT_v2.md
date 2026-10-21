@@ -3,7 +3,7 @@
 **Project:** Synpo GTM Automation
 **Reference specification:** `../GTM_Pipeline_PRD_v2_Creator_Review.md` (v2.0, 20 October 2026)
 **Report date:** 2026-10-21
-**Status:** V2-01 through V2-08 **Complete**. V2-09 is tracked but not started.
+**Status:** V2-01 through V2-09 **Complete** — all packages done, release-ready for the operator pilot.
 
 ---
 
@@ -19,7 +19,7 @@
 | V2-06 · Explicit discovery | Executable discovery requests, scoped adapter/manual path, idempotency, cancellation | **COMPLETE** |
 | **V2-07 · Drafts and manual history** | Manual editor, optional generation, immutable versions, copy/export, sent/reply events | **COMPLETE** |
 | **V2-08 · Review workspace UX** | Creators views/detail, contextual actions, live progress, responsive forms | **COMPLETE** |
-| V2-09 · Migration and release QA | Safe backfill, compatibility, test isolation, end-to-end sign-off | Not started |
+| V2-09 · Migration and release QA | Safe backfill, compatibility, test isolation, end-to-end sign-off | **COMPLETE** |
 
 ---
 
@@ -1508,3 +1508,312 @@ tests/test_contact_extraction.py      NEW (9 tests)
 tests/test_website_crawler.py         2 new crawler regressions
 docs/website-enrichment.md            contact extraction contract
 ```
+
+---
+
+## 10. V2-09 · Migration and release QA (Complete)
+
+### 10.1 What release QA found and fixed
+
+Running the PRD acceptance checklist (V01–V33) against the implemented test
+suite surfaced **two P0 defects** that the earlier packages' tests did not
+cover. Both are fixed here, with regression tests.
+
+#### P0-1 · The capture key could administer the workspace (V27)
+
+**Defect.** A single shared `API_KEY` authenticated every route, so the key
+the browser extension holds could call *every* dashboard-administration route:
+make fit decisions, run contact discovery, prepare drafts, retry work, read
+stats. This violated PRD server rule 6 ("Capture credentials can submit
+evidence/check connectivity/read their receipt; dashboard administration
+controls decisions, discovery and drafts") and scenario V27. The V2-05 report
+had recorded it as a known limitation — a "backend authorization change" that
+was never made.
+
+**Fix.** Two credential scopes now exist (`backend/app/dependencies.py`):
+
+| Credential | Env var | Scope |
+| --- | --- | --- |
+| **Operator** | `API_KEY` | Everything. The dashboard uses this. |
+| **Capture** | `CAPTURE_API_KEY` (optional) | Submit evidence, check connectivity, read its own receipt. **Nothing else.** |
+
+- `require_capture_key` guards the three capture routes
+  (`POST /leads`, `GET /leads`, `GET /leads/{lead_id}`).
+- `require_operator_key` guards the other **30** routes, and rejects a
+  capture key with **403** and a clear message.
+- With `CAPTURE_API_KEY` unset, `require_capture_key` falls back to the
+  shared key, so **the existing single-key deployment is unchanged**. Setting
+  the variable enforces the boundary.
+
+The extension needed no change: it already labels the field **Capture key**,
+sends it as `x-api-key`, and uses `GET /leads?limit=1` for its connectivity
+check — a capture route.
+
+#### P0-2 · A contact-only change wrongly invalidated a shortlist (V15)
+
+**Defect.** `material_change_reasons` treated *any* bio difference as
+material, so a creator who added an email to their bio was pushed back to
+**Review needed** and their gated work was blocked. PRD V15 says a
+contact-only change is not material.
+
+**Fix.** `backend/app/leads/evidence.py` gained `strip_contacts()` and
+`is_contact_only_change()`. A bio that only gains or loses an email, link,
+handle or phone (with its lead-in phrase, e.g. "Reach me at") is no longer
+material. A real content change is still material.
+
+```text
+"Finance educator" -> "Finance educator. Reach me at hi@x.test"   not material
+"Finance educator" -> "Now a travel creator"                       material
+```
+
+### 10.2 Acceptance checklist coverage (V01–V33)
+
+| ID | Scenario | Coverage |
+| --- | --- | --- |
+| V01 | Handle/URL/uppercase, concurrent | `test_evidence_versions.py` (3 variants + race) |
+| V02 | Late ack, A replayed after B | `test_v02_aba_replay_returns_original_without_rollback` |
+| V03 | Request id reused with a changed payload | `test_v03_request_id_reused_with_different_payload_is_conflict` |
+| V04 | Older/empty snapshot, future clock | `test_v04_future_clock_and_stale_evidence...` |
+| V05 | Hiker and AI absent, useful snapshot | `test_worker_snapshot.py`, `test_no_unintended_work.py` |
+| V06 | Handle only, then recapture | `test_v06_handle_only_needs_data_then_recapture_queues_research` |
+| V07 | Unknown / approximate / exact-zero counts | **extended** — `test_v07_exact_zero_count_is_not_substituted`, `test_v07_missing_counts_are_unknown_not_zero` |
+| V08 | Public email before shortlist | `test_v08_public_business_contacts_saved_and_visible` + `test_incidental_contacts_are_extracted_with_provenance` |
+| V09 | Page unavailable / SSRF | **extended** — `test_v09_existing_evidence_is_retained_when_a_page_fails` |
+| V10 | AI summary unavailable | `test_brief_renders_without_ai`, `test_manual_workflow_works_with_ai_disabled` |
+| V11 | High-fit AI never changes fit | **extended** — `test_v11_high_fit_ai_does_not_change_the_operator_decision` |
+| V12 | Shortlist click schedules nothing | `test_shortlist_does_not_schedule_contact_or_draft` |
+| V13 | Research more / Reject / Reopen | `test_v13_research_more_reject_reopen_and_shortlist` |
+| V14 | Material change after shortlist | `test_v14_bio_change_marks_review_needed_and_blocks_gates` (+2) |
+| V15 | Non-material changes | **extended** — `test_v15_contact_only_change_is_not_material` (P0-2) |
+| V16 | Rejected creator + new evidence | `test_v16_rejected_creator_gains_new_evidence_flag_without_reopening` |
+| V17 | Unshortlisted/stale calls gated APIs | **extended** — `test_v17_generation_rejected_without_shortlist`, `test_v17_generation_rejected_for_stale_decision`, `test_v17_discovery_rejected_without_shortlist` |
+| V18 | Repeated discovery request | **extended** — `test_v18_repeated_discovery_reuses_the_attempt_and_shows_progress` |
+| V19 | Discovery found / not found / blocked | `test_v19_discovery_*` (3 tests) |
+| V20 | Revocation during gated work | `test_v20_revocation_*` (2 tests) |
+| V21 | Known email / DM-only creator | **extended** — `test_v21_known_email_is_reused_without_rediscovery`, `test_v21_dm_only_creator_needs_no_email` |
+| V22 | AI disabled | `test_v22_*` (3 tests) + `test_retry_ai_without_ai_returns_409` |
+| V23 | Generate/regenerate, retry | `test_v23_*` (5 tests) + `test_outreach_stage_preserves_reviewed_drafts` |
+| V24 | Copy/export/mark reviewed vs Log sent | **extended** — `test_v24_logged_event_records_the_shared_operator` (actor) |
+| V25 | Corrected log / reply | `test_v25_*` (5 tests) |
+| V26 | Capture queue at 50 items | `extension/lib.test.js` (5 tests) |
+| V27 | Capture key vs admin route | **fixed** — `test_v27_capture_key_is_rejected_on_admin_routes`, `test_v27_capture_key_can_submit_and_read_its_receipt`, `test_v27_wrong_key_fails_without_disclosing_secrets`, `test_v27_single_key_deployment_still_works` |
+| V28 | Worker offline, then recovers | **extended** — `test_v28_save_is_distinct_from_processing_and_survives_restart` |
+| V29 | Live progress without focus/input loss | `LiveRefresh` (5s poll, focus restore, announce-once); draft text held in React state. Frontend-only — no browser harness exists. |
+| V30 | Invalid value retained, mobile widths, keyboard | `test_v30_frontend_accessibility_audit_passes` (now in pytest) + `test_lead_validation.py` |
+| V31 | Legacy dataset migration | **new** — `test_v31_migrations_preserve_legacy_data_and_create_no_work` (+ idempotence, + rollback) against a **real PostgreSQL** database |
+| V32 | Installed extension on a real profile | `extension/lib.test.js` (V32 unit/contract). A true installed-extension run remains a manual step. |
+| V33 | End-to-end operator pilot | **Manual** — see §10.6. |
+
+### 10.3 Migration safety (V31)
+
+The migration test runs the **real Alembic chain** against a scratch
+PostgreSQL database, because the migrations use PostgreSQL SQL (`md5()`,
+`ON CONFLICT`) that SQLite cannot execute. It proves:
+
+- The legacy `lead_id` survives.
+- The legacy `fit_decisions` row survives, with its note.
+- The legacy draft becomes the first `draft_revisions` row with its subject,
+  body, DM text, review state (`reviewed`) and model intact.
+- The legacy public email becomes a `contacts` row with the provenance limit
+  explicit: `source_url=""`, `method="legacy"`, `validation_state="unverified"`
+  — no invented source, no invented validation claim.
+- **Zero** `pipeline_jobs` and **zero** `outreach_events` are created: the
+  migration schedules no work and marks nothing as sent.
+- The upgrade is idempotent, and the downgrade restores the pre-migration
+  state without touching the legacy draft row.
+
+The live database was migrated in place earlier (V2-04/V2-07) and is
+unchanged by this package: **9 leads, 4 contacts, 8 legacy drafts preserved
+as 8 revisions, 0 outreach events**.
+
+### 10.4 Automated audits
+
+Two audits now run **inside pytest**, so they cannot silently regress:
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\audit_p0.py
+.\backend\.venv\Scripts\python.exe scripts\audit_frontend_a11y.py
+```
+
+| Audit | Checks | Result |
+| --- | --- | --- |
+| `audit_p0.py` | Destructive migrations, secret values in logs, unguarded mutating routes, message-dispatch code paths, frontend credential reads | **0 problems** |
+| `audit_frontend_a11y.py` | Accessible name + visible focus ring on every control, ≥44px touch targets, no overflow at 360px | **0 issues** (50 elements) |
+
+The P0 audit was **self-tested**: each defect class was injected into a
+scratch copy of the repo and confirmed to be detected, so a clean report is
+meaningful rather than vacuous.
+
+### 10.5 Test isolation
+
+- The full suite passes in a fixed order, in randomised order, and in
+  **randomised order on a second run** (different seed).
+- Every one of the 28 test files passes **in isolation** — no hidden
+  inter-test dependency.
+
+### 10.6 Known limitations (not defects)
+
+| Item | Why it stays open |
+| --- | --- |
+| V29 / V30 behavioural proof | The repository has **no frontend test runner** (no vitest/jest/playwright). V29 and V30 are covered by implementation plus a static audit. Adding a DOM harness is a V2-08 follow-up, not a release blocker. |
+| V32 installed-extension run | The extension is proven by unit + API-contract tests. The PRD itself states "a test-only parser pass is insufficient for installed-extension sign-off" — this needs a real browser. |
+| V33 operator pilot | Requires 4 of 5 pilot operators to complete the workflow unaided, with recorded task time (PRD §11). This is a **human** activity; the tooling is ready. |
+
+### 10.7 Verification
+
+| Check | Result |
+| --- | --- |
+| `python -m pytest` | **326 passed** (302 + 24 new) |
+| Randomised order, two seeds | 326 passed |
+| Every test file in isolation | 28/28 files passed, 0 failures |
+| `npm run lint` | clean (0 problems) |
+| `npx tsc --noEmit` | clean (exit 0) |
+| `npm run build` | success — 13 routes, no hydration or routing errors |
+| `extension/lib.test.js` | 49/49 pass |
+| `scripts/audit_p0.py` | 0 problems |
+| `scripts/audit_frontend_a11y.py` | 0 issues |
+| Live database | unchanged: 9 leads, 4 contacts, 8 revisions, 0 events |
+
+### 10.8 Files changed
+
+**Backend**
+
+```text
+app/config.py                    CAPTURE_API_KEY setting
+app/dependencies.py              require_capture_key / require_operator_key
+app/leads/routes.py              per-route auth (3 capture, 7 operator)
+app/leads/draft_routes.py        operator-only
+app/dashboard/routes.py          operator-only
+app/campaigns/routes.py          operator-only
+app/leads/evidence.py            strip_contacts / is_contact_only_change (P0-2)
+tests/test_release_qa.py         NEW (17 tests)
+tests/test_release_migration.py  NEW (7 tests, incl. the real migration run)
+```
+
+**Frontend / scripts / config**
+
+```text
+scripts/audit_p0.py               NEW - P0 release audit
+.env.example                     CAPTURE_API_KEY, TEST_DATABASE_URL
+backend/.env.example             CAPTURE_API_KEY
+docs/api.md                      capture vs operator authorization
+```
+
+---
+
+## Appendix B. Release Readiness
+
+**Status: ready for the operator pilot (V33).**
+
+### B.1 The V2 redesign is fully implemented
+
+All nine work packages are complete and verified:
+
+| Package | Outcome |
+| --- | --- |
+| V2-01 · Stop unintended work | No auto-fan-out; AI guarded; contact masking withdrawn; drafts preserved |
+| V2-02 · Evidence and scheduling | Durable receipts, immutable evidence versions, safe merge, recapture processing |
+| V2-03 · Review and state | Research/fit separated, one campaign config, material-change rules, decision history |
+| V2-04 · Brief and public contacts | Non-AI evidence brief, incidental contact extraction with provenance, legacy migration |
+| V2-05 · Extension reliability | Capture preview, scoped capture key, 50-item queue, connection/retry outcomes |
+| V2-06 · Explicit discovery | Executable requests, scoped adapter/manual path, idempotency, cancellation |
+| V2-07 · Drafts and manual history | Manual editor, optional generation, immutable versions, copy/export, sent/reply events |
+| V2-08 · Review workspace UX | Creators/Outreach/Settings, saved views, contextual actions, live progress, responsive + accessible |
+| V2-09 · Migration and release QA | Acceptance checklist, two P0 fixes, migration proof, automated audits |
+
+The pipeline now runs the reviewed sequence end to end:
+
+```text
+capture -> research -> brief -> review -> shortlist -> contact -> draft -> log sent
+```
+
+Every step is explicit. Nothing happens implicitly: no shortlist schedules
+work, no dossier completion schedules a draft, no generation happens without a
+request, and **no route or stage sends a message**.
+
+### B.2 All legacy migrations are safely applied
+
+Seven migrations ran in order on the live database, head `a7b8c9d0e1f2`:
+
+| Revision | What it did | Safety |
+| --- | --- | --- |
+| `d556f1834724` | Initial schema | — |
+| `a1b2c3d4e5f6` | Capture snapshot | Additive |
+| `b2c3d4e5f6a7` | Fit requests, heartbeat | Additive |
+| `c3d4e5f6a7b8` | Capture receipts, evidence versions | Additive |
+| `d4e5f6a7b8c9` | Review state | Additive |
+| `e5f6a7b8c9d0` | Public contacts + legacy backfill | Additive; provenance explicitly "Legacy source unknown" |
+| `f6a7b8c9d0e1` | Contact discovery | Additive; legacy requests marked "not scheduled" rather than bulk-run |
+| `a7b8c9d0e1f2` | Draft revisions + outreach events | Additive; legacy drafts preserved as revisions |
+
+Migration safety is now **proven, not assumed** (`tests/test_release_migration.py`
+runs the real Alembic chain against a scratch PostgreSQL database):
+
+- legacy ids, draft text, models and decision history **survive**;
+- provenance limits stay explicit (no invented source, no invented validation);
+- **zero** mass jobs and **zero** sent events are created;
+- the upgrade is idempotent and the downgrade is clean.
+
+The live database is unchanged by the release work: **9 leads, 4 contacts,
+8 legacy drafts preserved as 8 revisions, 0 outreach events.**
+
+One earlier hotfix also applied safely: 416 garbage phone rows (CSS
+dimensions and tracking codes harvested as contacts) were removed, leaving the
+4 legitimate legacy email rows intact.
+
+### B.3 The system is safe to operate
+
+| Property | Evidence |
+| --- | --- |
+| No unauthorized access | A capture key can only submit evidence, check connectivity and read its receipt; it is refused (403) on all 30 administration routes |
+| No fabricated contacts | Strict extraction; a 30-digit tracking code and a decimal string are not phones; contacts carry source, time and method |
+| No silent data loss | Draft content is append-only; every save is a new version; corrections are visible history, never a rewrite |
+| No unintended work | Shortlisting, dossier completion and capture schedule no contact/discovery/draft work |
+| No message dispatch | The P0 audit finds no send path; the only "sent" event is a manual log |
+| No secret exposure | Provider keys stay server-side; the frontend reads none; logs name missing variables, never values |
+| Truthful states | Unknown counts stay Unknown, exact zero stays 0, approximate keeps its marker, blocked research shows its remedy |
+| Recoverable | Jobs survive a worker crash; a capture survives an outage; unsaved edits survive a live refresh |
+
+### B.4 Verification summary
+
+```text
+python -m pytest          326 passed   (fixed order, randomised order, per-file isolation)
+npm run lint               clean
+npx tsc --noEmit          clean
+npm run build              success, 13 routes, no hydration or routing errors
+node --test extension      49/49 pass
+scripts/audit_p0.py        0 problems
+scripts/audit_frontend_a11y.py   0 issues (50 elements)
+```
+
+### B.5 Before the pilot starts
+
+Two configuration steps are worth doing first (both optional; the system
+runs without them):
+
+1. **Set `CAPTURE_API_KEY`** to a different value from `API_KEY` and give it
+   to the extension. This enforces the capture/operator boundary instead of
+   relying on the single-key fallback.
+2. **Set `TEST_DATABASE_URL`** to a local PostgreSQL URL so the migration
+   safety tests run instead of skipping.
+
+### B.6 What the pilot still needs
+
+The tooling is complete; two items are human activities that the PRD
+explicitly requires and that no automated test can replace:
+
+- **V32 — installed-extension sign-off.** Install the extension against an
+  approved, accessible profile sample and confirm the saved result appears in
+  the dashboard. The PRD notes that "a test-only parser pass is insufficient".
+- **V33 — the operator pilot.** Capture three creators, review them,
+  shortlist one, prepare a draft and log the externally sent event **without
+  engineering assistance**. The PRD release decision needs 4 of 5 operators to
+  complete it, with the task time recorded.
+
+Two further items are known follow-ups rather than blockers:
+
+- **V29 / V30 behavioural proof** needs a frontend DOM test runner; today they
+  are covered by implementation plus the static audit that now runs in pytest.
+- **V26** is proven at the `lib.js` level; `background.js`, `popup.js` and
+  `content.js` have no direct unit tests, so queue retention across a service
+  worker restart is proven by construction rather than by test.
